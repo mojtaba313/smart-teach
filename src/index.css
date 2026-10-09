@@ -1,0 +1,423 @@
+@import 'katex/dist/katex.min.css';
+
+/* ------------------------------------------------------------------ *
+ *  Vazirmatn, self-hosted.
+ *  A lesson is often presented without internet, and a CDN font means the
+ *  Persian text reflows mid-class. Six weights, ~310 KB, cached forever.
+ * ------------------------------------------------------------------ */
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-Black.woff2') format('woff2');
+  font-weight: 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ================================================================== *
+ *  Design tokens
+ *  Everything in the app paints from these, so light / paper / dark
+ *  (and any future theme) swap in one place.
+ * ================================================================== */
+
+:root,
+[data-theme='light'] {
+  --bg: 246 248 251;
+  --elev: 255 255 255;
+  --sunken: 240 244 249;
+  --soft: 255 248 240;
+  --line: 224 230 238;
+  --line-strong: 198 209 224;
+  --ink: 15 23 42;
+  --ink-2: 51 65 85;
+  --ink-3: 106 122 145;
+  --brand: 217 74 8;
+  --brand-soft: 255 237 213;
+  --accent: 29 78 216;
+  --accent-soft: 219 234 254;
+  --danger: 190 18 60;
+  --warn: 161 98 7;
+  --ok: 21 128 61;
+  --ring: 234 88 12;
+  --on-brand: 255 255 255;
+  --on-accent: 255 255 255;
+  --shadow-color: 226 232 240;
+  --grid: 15 23 42;
+  --scene: 255 255 255;
+  --scene-grid: 226 232 240;
+  --scene-ink: 51 65 85;
+  color-scheme: light;
+}
+
+[data-theme='paper'] {
+  --bg: 244 238 224;
+  --elev: 253 250 242;
+  --sunken: 236 228 209;
+  --soft: 248 241 226;
+  --line: 223 213 190;
+  --line-strong: 200 186 155;
+  --ink: 41 35 29;
+  --ink-2: 82 73 63;
+  --ink-3: 133 120 104;
+  --brand: 180 83 9;
+  --brand-soft: 251 232 200;
+  --accent: 30 64 175;
+  --accent-soft: 219 226 249;
+  --danger: 159 18 57;
+  --warn: 146 96 14;
+  --ok: 22 101 52;
+  --ring: 180 83 9;
+  --on-brand: 255 255 255;
+  --on-accent: 255 255 255;
+  --shadow-color: 209 197 172;
+  --grid: 41 35 29;
+  --scene: 253 250 242;
+  --scene-grid: 223 213 190;
+  --scene-ink: 82 73 63;
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  --bg: 7 10 16;
+  --elev: 16 22 33;
+  --sunken: 11 16 25;
+  --soft: 23 30 43;
+  --line: 37 47 65;
+  --line-strong: 58 71 94;
+  --ink: 226 232 240;
+  --ink-2: 165 178 197;
+  --ink-3: 124 138 159;
+  --brand: 251 146 60;
+  --brand-soft: 61 36 17;
+  --accent: 125 168 255;
+  --accent-soft: 24 40 71;
+  --danger: 253 164 175;
+  --warn: 253 224 71;
+  --ok: 74 222 128;
+  --ring: 251 146 60;
+  --on-brand: 12 16 24;
+  --on-accent: 8 12 20;
+  --shadow-color: 0 0 0;
+  --grid: 226 232 240;
+  --scene: 13 18 28;
+  --scene-grid: 39 50 70;
+  --scene-ink: 165 178 197;
+  color-scheme: dark;
+}
+
+/* ================================================================== *
+ *  Base
+ * ================================================================== */
+
+@layer base {
+  html {
+    font-family: 'Vazirmatn', 'Segoe UI', Tahoma, system-ui, sans-serif;
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    margin: 0;
+    background: rgb(var(--bg));
+    color: rgb(var(--ink));
+    font-feature-settings: 'ss01';
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: rgb(var(--brand) / 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--ring));
+    outline-offset: 2px;
+    border-radius: 0.4rem;
+  }
+
+  /* Never let a stray outline look "broken" on dark surfaces. */
+  [data-theme='dark'] :focus-visible {
+    outline-color: rgb(var(--ring));
+  }
+
+  ::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgb(var(--line-strong) / 0.7);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--line-strong));
+    background-clip: content-box;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* Make the native caret visible on tinted inputs. */
+  input::placeholder,
+  textarea::placeholder {
+    color: rgb(var(--ink-3) / 0.75);
+  }
+}
+
+/* ================================================================== *
+ *  Reusable component classes
+ * ================================================================== */
+
+@layer components {
+  .surface {
+    background: rgb(var(--elev));
+    border: 1px solid rgb(var(--line));
+    box-shadow:
+      0 1px 2px rgb(var(--shadow-color) / 0.5),
+      0 8px 24px -16px rgb(var(--shadow-color));
+  }
+
+  .surface-flat {
+    background: rgb(var(--elev));
+    border: 1px solid rgb(var(--line));
+  }
+
+  .sunken {
+    background: rgb(var(--sunken));
+    border: 1px solid rgb(var(--line));
+  }
+
+  .kbd {
+    direction: ltr;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.55rem;
+    height: 1.35rem;
+    padding: 0 0.35rem;
+    border-radius: 0.4rem;
+    border: 1px solid rgb(var(--line));
+    border-bottom-width: 2px;
+    background: rgb(var(--sunken));
+    color: rgb(var(--ink-2));
+    font-family: inherit;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  /* Block chrome — the shared frame every content box sits in. */
+  .block-shell {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1rem;
+    border: 1px solid rgb(var(--line));
+    background: rgb(var(--elev));
+    box-shadow: 0 1px 2px rgb(var(--shadow-color) / 0.45);
+    transition:
+      box-shadow 0.2s ease,
+      border-color 0.2s ease,
+      transform 0.2s ease;
+  }
+
+  /* 4px accent rail on the inline-start edge (right side in RTL). */
+  .block-shell::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 4px;
+    background: var(--k-accent, rgb(var(--brand)));
+    opacity: 0.9;
+  }
+
+  .block-shell-plain::before {
+    display: none;
+  }
+
+  .hairline {
+    background-image: linear-gradient(
+      to left,
+      transparent,
+      rgb(var(--line)) 12%,
+      rgb(var(--line)) 88%,
+      transparent
+    );
+    height: 1px;
+  }
+
+  .grain {
+    background-image: radial-gradient(rgb(var(--line)) 0.5px, transparent 0.5px);
+    background-size: 14px 14px;
+  }
+
+  /* The 6-column block grid used by both the editor and the presenter. */
+  .block-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.75rem;
+    align-items: start;
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--line-strong)) transparent;
+  }
+}
+
+/* ================================================================== *
+ *  Maths & media
+ * ================================================================== */
+
+.katex {
+  font-size: 1.15em;
+}
+.katex-display {
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}
+.katex-display > .katex {
+  text-align: center;
+}
+
+[dir='ltr'] .katex-display > .katex {
+  text-align: left;
+}
+
+/* ================================================================== *
+ *  Motion
+ * ================================================================== */
+
+@keyframes pop-in {
+  from {
+    transform: scale(0.94) translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+.confetti-host {
+  animation: pop-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--sunken)) 0%,
+    rgb(var(--line) / 0.7) 50%,
+    rgb(var(--sunken)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes dash-march {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ================================================================== *
+ *  Print — a lesson plan you can hand out
+ * ================================================================== */
+
+@media print {
+  @page {
+    margin: 14mm;
+  }
+
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  .no-print,
+  header.studio-header,
+  footer.studio-footer {
+    display: none !important;
+  }
+
+  .block-shell {
+    break-inside: avoid;
+    box-shadow: none !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .print-full {
+    display: block !important;
+  }
+}
