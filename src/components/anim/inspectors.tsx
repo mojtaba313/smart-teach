@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Crosshair, Eye, EyeOff, LineChart, Plus, Shapes, Sparkles, Trash2, Wand2 } from 'lucide-react'
-import type { AnimPanel, Animation, AnimLayer, AnimSeries, AnimShape, SeriesStyle } from '../../types'
+import type { AnimAnnotation, AnimPanel, AnimSegment, Animation, AnimLayer, AnimSeries, AnimShape, SeriesStyle } from '../../types'
 import {
   ANIM_PROPS,
   ANIM_PROP_LABEL,
@@ -14,6 +14,7 @@ import {
 } from '../../types'
 import { check, EXPR_EXAMPLES, EXPR_FUNCS } from '../../lib/anim/expr'
 import { currentValue, fitDomains, scenePanels, seriesLookupOf, withoutKey, withKey } from '../../lib/anim/engine'
+import type { Timed } from '../../lib/anim/engine'
 import { PATH_PRESETS } from '../../lib/anim/presets'
 import { cn, parseNum, pick, round, toFaDigits } from '../../lib/utils'
 import { Badge, Button, Field, IconButton, Input, Segmented, Select, Switch } from '../ui/primitives'
@@ -175,6 +176,93 @@ function ColorSwatches({ value, onChange }: { value: string; onChange: (v: strin
  *  Layer inspector
  * ------------------------------------------------------------------ */
 
+
+/* ------------------------------------------------------------------ *
+ *  Appearance window — how an element sequences itself on the timeline
+ * ------------------------------------------------------------------ */
+
+function WindowFields<T extends Timed>({
+  item,
+  onChange,
+  duration,
+}: {
+  item: T
+  onChange: (next: T) => void
+  duration: number
+}) {
+  const set = <K extends keyof Timed>(k: K, v: number | undefined) => {
+    const next = { ...item }
+    if (v === undefined || v === 0) delete next[k]
+    else (next as Timed)[k] = v
+    onChange(next)
+  }
+  return (
+    <>
+      <Row label="از ثانیه" hint="پیش از این زمان عنصر دیده نمی‌شود">
+        <Num value={item.visibleFrom ?? 0} step={0.5} suffix="ث" onChange={(v) => set('visibleFrom', v)} />
+      </Row>
+      <Row label="تا ثانیه" hint="پس از این زمان عنصر دیده نمی‌شود">
+        <Num value={item.visibleTo ?? duration} step={0.5} suffix="ث" onChange={(v) => set('visibleTo', v)} />
+      </Row>
+      <Row label="محو ورود" hint="طول محو‌شدن هنگام ظاهرشدن">
+        <Num value={item.fadeIn ?? 0} step={0.1} suffix="ث" onChange={(v) => set('fadeIn', v)} />
+      </Row>
+      <Row label="محو خروج" hint="طول محو‌شدن هنگام ناپدیدشدن">
+        <Num value={item.fadeOut ?? 0} step={0.1} suffix="ث" onChange={(v) => set('fadeOut', v)} />
+      </Row>
+    </>
+  )
+}
+
+/** `dt` and friends: local names an expression may use. */
+function ExprParamsFields({
+  value,
+  onChange,
+  t,
+}: {
+  value: Record<string, string> | undefined
+  onChange: (next: Record<string, string>) => void
+  t: number
+}) {
+  const [name, setName] = useState('')
+  const entries = Object.entries(value ?? {})
+  return (
+    <>
+      {entries.map(([k, v]) => (
+        <Row key={k} label={k} hint="مقدار این متغیر بر حسب t">
+          <ExprField
+            label={k}
+            value={v}
+            t={t}
+            exampleSet={-1}
+            onChange={(next) => onChange({ ...(value ?? {}), [k]: next })}
+          />
+        </Row>
+      ))}
+      <Row label="نام تازه" hint="سپس در فرمول exprX/exprY از این نام استفاده کنید">
+        <span className="flex items-center gap-1">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="dt"
+            className="h-8 w-full min-w-0 rounded-lg border border-hairline bg-surface px-2 text-xs font-bold outline-none focus:border-brand/70"
+          />
+          <IconButton
+            label="افزودن متغیر محلی"
+            icon={Plus}
+            onClick={() => {
+              const k = name.trim()
+              if (!k || k === 't' || value?.[k] !== undefined) return
+              onChange({ ...(value ?? {}), [k]: 't' })
+              setName('')
+            }}
+          />
+        </span>
+      </Row>
+    </>
+  )
+}
+
 export function LayerInspector({
   layer,
   anim,
@@ -257,6 +345,11 @@ export function LayerInspector({
           <div className="space-y-2 rounded-xl bg-sunken/60 p-2.5">
             <ExprField label="x(t)" value={layer.exprX} onChange={(v) => set('exprX', v)} t={t} exampleSet={0} />
             <ExprField label="y(t)" value={layer.exprY} onChange={(v) => set('exprY', v)} t={t} exampleSet={1} />
+            <ExprParamsFields
+              value={layer.exprParams}
+              t={t}
+              onChange={(next) => set('exprParams', next)}
+            />
             <p className="text-[10px] leading-4 text-ink-3">
               متغیر <span className="font-mono">t</span> زمان بر حسب ثانیه است.
               <span className="mt-1 block font-mono text-[10px] leading-4 opacity-80" dir="ltr">
@@ -561,6 +654,7 @@ export function LayerInspector({
 export function SeriesInspector({
   series,
   t,
+  duration,
   index,
   panelOptions,
   onChange,
@@ -568,6 +662,7 @@ export function SeriesInspector({
 }: {
   series: AnimSeries
   t: number
+  duration: number
   index: number
   panelOptions: { id: string; title?: string }[]
   onChange: (next: AnimSeries) => void
@@ -644,6 +739,10 @@ export function SeriesInspector({
             مقدار در t = {toFaDigits(t.toFixed(2))} ثانیه: {toFaDigits(String(value))}
           </Badge>
         )}
+      </Section>
+
+      <Section title="پنجرهٔ دیده‌شدن">
+        <WindowFields item={series} duration={duration} onChange={onChange} />
       </Section>
     </>
   )
@@ -853,6 +952,218 @@ export function SceneInspector({ anim, onChange }: { anim: Animation; onChange: 
         )}
       </Section>
     </>
+  )
+}
+
+/* ------------------------------------------------------------------ *
+ *  Segments and annotations — the measuring tape of a diagram
+ * ------------------------------------------------------------------ */
+
+export function SegmentInspector({
+  segment,
+  anim,
+  onChange,
+  onRemove,
+}: {
+  segment: AnimSegment
+  anim: Animation
+  onChange: (next: AnimSegment) => void
+  onRemove: () => void
+}) {
+  const set = <K extends keyof AnimSegment>(k: K, v: AnimSegment[K]) => onChange({ ...segment, [k]: v })
+  const layerOptions = anim.layers.map((l) => ({ value: l.id, label: l.name }))
+  return (
+    <Section
+      title="پاره‌خط"
+      action={
+        <IconButton label="حذف پاره‌خط" icon={Trash2} variant="danger" size="sm" onClick={onRemove} />
+      }
+    >
+      <Row label="از جسم" hint="ابتدای پاره‌خط همیشه روی یک جسم است">
+        <Select value={segment.fromLayer} onChange={(e) => set('fromLayer', e.target.value)} className="h-8 text-xs">
+          {layerOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </Row>
+      <Row label="تا جسم" hint="خالی بگذارید تا سر دوم روی نقطهٔ ثابت بنشیند">
+        <Select
+          value={segment.toLayer ?? ''}
+          onChange={(e) => set('toLayer', e.target.value || undefined)}
+          className="h-8 text-xs"
+        >
+          <option value="">— نقطهٔ ثابت —</option>
+          {layerOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      </Row>
+      {!segment.toLayer && (
+        <>
+          <Row label="x مقصد">
+            <Num value={segment.toPoint?.x ?? 0} step={0.5} onChange={(v) => set('toPoint', { ...(segment.toPoint ?? { x: 0, y: 0 }), x: v })} />
+          </Row>
+          <Row label="y مقصد">
+            <Num value={segment.toPoint?.y ?? 0} step={0.5} onChange={(v) => set('toPoint', { ...(segment.toPoint ?? { x: 0, y: 0 }), y: v })} />
+          </Row>
+        </>
+      )}
+      <Row label="رنگ">
+        <ColorSwatches value={segment.color} onChange={(v) => set('color', v)} />
+      </Row>
+      <Row label="ضخامت">
+        <Num value={segment.width ?? 3} step={0.5} onChange={(v) => set('width', v)} />
+      </Row>
+      <Switch
+        checked={segment.dashed === true}
+        onChange={(v) => set('dashed', v || undefined)}
+        label="خط‌چین"
+      />
+      <Switch
+        checked={segment.showSlope === true}
+        onChange={(v) => set('showSlope', v || undefined)}
+        label="نمایش شیب روی خط"
+      />
+      <WindowFields item={segment} duration={anim.duration} onChange={onChange} />
+    </Section>
+  )
+}
+
+export function AnnotationInspector({
+  annotation,
+  anim,
+  onChange,
+  onRemove,
+}: {
+  annotation: AnimAnnotation
+  anim: Animation
+  onChange: (next: AnimAnnotation) => void
+  onRemove: () => void
+}) {
+  const set = <K extends keyof AnimAnnotation>(k: K, v: AnimAnnotation[K]) => onChange({ ...annotation, [k]: v })
+  const layerOptions = anim.layers.map((l) => ({ value: l.id, label: l.name }))
+  const anchorField = (which: 'from' | 'to') => (
+    <Select
+      value={annotation[which].layer ?? ''}
+      onChange={(e) =>
+        set(which, e.target.value ? { ...annotation[which], layer: e.target.value } : { ...annotation[which], layer: undefined })
+      }
+      className="h-8 text-xs"
+    >
+      <option value="">— نقطهٔ ثابت —</option>
+      {layerOptions.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </Select>
+  )
+  return (
+    <Section
+      title={annotation.kind === 'span' ? 'فاصله' : 'آکولاد'}
+      action={
+        <IconButton label="حذف نشانه" icon={Trash2} variant="danger" size="sm" onClick={onRemove} />
+      }
+    >
+      <Row label="از جسم">
+        {anchorField('from')}
+      </Row>
+      <Row label="تا جسم">
+        {anchorField('to')}
+      </Row>
+      <Row label="جهت" hint="auto یعنی خودش از روی دو سرِ نشانه تشخیص می‌دهد">
+        <Segmented
+          value={annotation.orientation}
+          onChange={(v) => set('orientation', v as AnimAnnotation['orientation'])}
+          options={[
+            { value: 'auto', label: 'خودکار' },
+            { value: 'horizontal', label: 'افقی' },
+            { value: 'vertical', label: 'عمودی' },
+          ]}
+        />
+      </Row>
+      <Row label="برچسب">
+        <Input value={annotation.label} onChange={(e) => set('label', e.target.value)} placeholder="Δt" />
+      </Row>
+      <Row label="رنگ">
+        <ColorSwatches value={annotation.color ?? '#2563eb'} onChange={(v) => set('color', v)} />
+      </Row>
+      <Row label="سمت" hint="کدام سوی خط آکولاد بنشیند">
+        <Segmented
+          value={String(annotation.side ?? 1)}
+          onChange={(v) => set('side', Number(v) as 1 | -1)}
+          options={[
+            { value: '1', label: 'یک' },
+            { value: '-1', label: 'منفی' },
+          ]}
+        />
+      </Row>
+      <WindowFields item={annotation} duration={anim.duration} onChange={onChange} />
+    </Section>
+  )
+}
+
+export function AddSegmentButton({
+  onAdd,
+  anim,
+}: {
+  onAdd: (s: AnimSegment) => void
+  anim: Animation
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="subtle"
+      icon={Plus}
+      disabled={anim.layers.length < 2}
+      onClick={() =>
+        onAdd({
+          id: uid('seg'),
+          fromLayer: anim.layers[0]?.id ?? '',
+          toLayer: anim.layers[1]?.id,
+          color: COLORS[anim.layers.length % COLORS.length],
+          width: 3,
+        })
+      }
+      block
+    >
+      افزودن پاره‌خط
+    </Button>
+  )
+}
+
+export function AddAnnotationButton({
+  onAdd,
+  anim,
+}: {
+  onAdd: (a: AnimAnnotation) => void
+  anim: Animation
+}) {
+  return (
+    <Button
+      size="sm"
+      variant="subtle"
+      icon={Plus}
+      disabled={anim.layers.length < 1}
+      onClick={() =>
+        onAdd({
+          id: uid('ann'),
+          kind: 'brace',
+          from: { layer: anim.layers[0]?.id },
+          to: { layer: anim.layers[1]?.id ?? anim.layers[0]?.id },
+          orientation: 'auto',
+          label: 'Δt',
+          side: 1,
+        })
+      }
+      block
+    >
+      افزودن آکولاد
+    </Button>
   )
 }
 

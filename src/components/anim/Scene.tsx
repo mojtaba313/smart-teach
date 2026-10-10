@@ -4,6 +4,10 @@ import { cn } from '../../lib/utils'
 import { evalExpr } from '../../lib/anim/expr'
 import {
   animationDuration,
+  anchorPos,
+  layerPos,
+  windowOpacity,
+  type Timed,
   layerAcceleration,
   layerVelocity,
   lastFinite,
@@ -392,11 +396,15 @@ export const AnimationScene = memo(function AnimationScene({
   const duration = animationDuration(anim)
   const lookup = useMemo(() => seriesLookupOf(anim), [anim])
 
+  // `duration` is not available yet at these memos, so the window check happens
+  // at draw time — one call each, and it is what lets a lesson sequence itself.
   const activeSeries = useMemo(() => anim.series.filter((s) => s.visible && s.expr.trim()), [anim.series])
   const activeLayers = useMemo(() => anim.layers.filter((l) => l.visible), [anim.layers])
-  const primaryLayer = activeLayers[0]
-
   const cursorT = Math.min(Math.max(t, 0), duration)
+  const win = (w?: Timed) => windowOpacity(w, cursorT, duration)
+  const liveSeries = activeSeries.filter((s) => win(s) > 0.001)
+  const liveLayers = activeLayers.filter((l) => win(l) > 0.001)
+  const primaryLayer = activeLayers[0]
 
   const padL = 58
   const padR = 22
@@ -424,6 +432,8 @@ export const AnimationScene = memo(function AnimationScene({
     }
   }
 
+  /** segments and annotations belong to the default panel */
+  const basePanel = () => panels[0]
   /** which panel a view-box y falls in */
   const panelAt = (py: number): PanelScale => {
     for (const p of panels) if (py >= p.top && py <= p.bottom) return p
@@ -652,7 +662,7 @@ export const AnimationScene = memo(function AnimationScene({
         )}
 
         {/* curves */}
-        {activeSeries.map((s) => {
+        {liveSeries.map((s) => {
           const targets = panelTargets(panels, s.panel)
           const to = s.reveal ? cursorT : duration
           const dotEvery = duration / 24
@@ -687,6 +697,7 @@ export const AnimationScene = memo(function AnimationScene({
                       strokeWidth={3.4}
                       strokeLinecap="round"
                       strokeDasharray={s.style === 'dashed' ? '11 9' : undefined}
+                      opacity={win(s)}
                     />
                     {Number.isFinite(head) && (
                       <g>
@@ -764,7 +775,7 @@ export const AnimationScene = memo(function AnimationScene({
         })}
 
         {/* objects */}
-        {activeLayers.map((layer) => {
+        {liveLayers.map((layer) => {
           const st = layerState(layer, cursorT, lookup, duration)
           const v = layerVelocity(layer, cursorT, lookup)
           const a = layerAcceleration(layer, cursorT, lookup)
@@ -783,7 +794,7 @@ export const AnimationScene = memo(function AnimationScene({
                 const sizePx = Math.max(2, st.size * (p.bottom - p.top))
                 const r = Math.max(3, sizePx / 2)
                 const inside = inPanel(p, px, py)
-                const opacity = inside ? 1 : 0.12
+                const opacity = (inside ? 1 : 0.12) * win(layer)
                 const pv = layer.positionVector
                 const showV = layer.vectors?.velocity ?? layer.showVelocity
                 const showA = layer.vectors?.acceleration ?? layer.showAcceleration
@@ -825,8 +836,14 @@ export const AnimationScene = memo(function AnimationScene({
                     {pv && pv.visible !== false && (
                       <Arrow
                         from={(() => {
-                          const a2 = pv.from === 'origin' || !pv.from ? { x: 0, y: 0 } : pv.from
-                          return { x: sx(a2.x), y: p.sy(a2.y) }
+                          const f = pv.from
+                          if (!f || f === 'origin') return { x: sx(0), y: p.sy(0) }
+                          if ('layer' in f) {
+                            const other = anim.layers.find((l) => l.id === f.layer)
+                            const op = other ? layerPos(other, cursorT, lookup) : null
+                            return op ? { x: sx(op.x), y: p.sy(op.y) } : { x: sx(0), y: p.sy(0) }
+                          }
+                          return { x: sx(f.x), y: p.sy(f.y) }
                         })()}
                         to={{ x: px, y: py }}
                         color={pv.color ?? layer.color}
@@ -894,6 +911,102 @@ export const AnimationScene = memo(function AnimationScene({
             </g>
           )
         })}
+        {/* segments and annotations sit on top: they measure what is below */}
+        {(anim.segments ?? [])
+          .filter((g) => win(g) > 0.001)
+          .map((g) => {
+            const a = anim.layers.find((l) => l.id === g.fromLayer)
+            const b = g.toLayer ? anim.layers.find((l) => l.id === g.toLayer) : null
+            if (!a) return null
+            const pa = layerPos(a, cursorT, lookup)
+            const pb = b ? layerPos(b, cursorT, lookup) : g.toPoint
+            if (!pb) return null
+            const panel = basePanel()
+            const A = { x: sx(pa.x), y: panel.sy(pa.y) }
+            const B = { x: sx(pb.x), y: panel.sy(pb.y) }
+            const k = win(g)
+            const dx = B.x - A.x
+            const dy = B.y - A.y
+            const len = Math.hypot(dx, dy)
+            if (!Number.isFinite(len) || len < 1) return null
+            const slope = (pb.y - pa.y) / Math.max(1e-6, pb.x - pa.x)
+            return (
+              <g key={g.id} opacity={k}>
+                <line
+                  x1={A.x}
+                  y1={A.y}
+                  x2={B.x}
+                  y2={B.y}
+                  stroke={g.color}
+                  strokeWidth={g.width ?? 3}
+                  strokeLinecap="round"
+                  strokeDasharray={g.dashed ? '10 7' : undefined}
+                />
+                {g.showSlope && (
+                  <text
+                    x={(A.x + B.x) / 2}
+                    y={(A.y + B.y) / 2 - 8}
+                    fontSize={16}
+                    fontWeight={800}
+                    fill={g.color}
+                    textAnchor="middle"
+                    style={{ paintOrder: 'stroke', stroke: 'rgb(var(--scene))', strokeWidth: 5 }}
+                  >
+                    {axisLabel(round2(slope))}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+
+        {(anim.annotations ?? [])
+          .filter((a) => win(a) > 0.001)
+          .map((a) => {
+            const pa = anchorPos(a.from, cursorT, lookup, anim.layers)
+            const pb = anchorPos(a.to, cursorT, lookup, anim.layers)
+            if (!pa || !pb) return null
+            const panel = basePanel()
+            const A = { x: sx(pa.x), y: panel.sy(pa.y) }
+            const B = { x: sx(pb.x), y: panel.sy(pb.y) }
+            const horizontal =
+              a.orientation === 'horizontal' ||
+              (a.orientation === 'auto' && Math.abs(B.x - A.x) >= Math.abs(B.y - A.y))
+            const off = (a.side ?? 1) * 26
+            const ax = horizontal ? A.x : A.x + off
+            const ay = horizontal ? A.y + off : A.y
+            const bx = horizontal ? B.x : B.x + off
+            const by = horizontal ? B.y + off : B.y
+            const tip = horizontal ? 8 : -8
+            return (
+              <g key={a.id} opacity={win(a)}>
+                <path
+                  d={
+                    a.kind === 'span'
+                      ? `M ${ax} ${ay} L ${bx} ${by}`
+                      : `M ${ax + (horizontal ? 0 : tip)} ${ay + (horizontal ? tip : 0)}
+                         L ${ax} ${ay}
+                         Q ${horizontal ? ax : ax + tip} ${horizontal ? ay + tip : ay} ${horizontal ? ax + tip : ax} ${horizontal ? ay + tip : ay}
+                         L ${bx + (horizontal ? 0 : tip)} ${by + (horizontal ? tip : 0)}`
+                  }
+                  fill="none"
+                  stroke={a.color ?? 'rgb(var(--scene-ink))'}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+                <text
+                  x={(ax + bx) / 2 + (horizontal ? 0 : (a.side ?? 1) * 12)}
+                  y={(ay + by) / 2 + (horizontal ? (a.side ?? 1) * 12 : -4)}
+                  fontSize={17}
+                  fontWeight={800}
+                  fill={a.color ?? 'rgb(var(--scene-ink))'}
+                  textAnchor="middle"
+                  style={{ paintOrder: 'stroke', stroke: 'rgb(var(--scene))', strokeWidth: 5 }}
+                >
+                  {a.label}
+                </text>
+              </g>
+            )
+          })}
       </svg>
 
       {showLegend && activeSeries.length > 0 && (

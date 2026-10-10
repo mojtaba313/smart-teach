@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
-import { motion } from 'framer-motion'
 import {
   ArrowRight,
+  Braces,
   Camera,
   CircleDot,
   Eraser,
@@ -10,10 +8,12 @@ import {
   Layers,
   LineChart,
   MousePointerClick,
+  MoveRight,
   Pause,
   Play,
   Redo2,
   RotateCcw,
+  Ruler,
   SkipBack,
   SkipForward,
   Sparkles,
@@ -21,6 +21,9 @@ import {
   Square,
   Undo2,
 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams } from 'next/navigation'
+import { motion } from 'framer-motion'
 import type { AnimLayer, AnimProp, Animation, AnimSeries, SlideStep } from '../types'
 import { ANIM_PROPS, emptyAnimation, newKey } from '../types'
 import { usePresentations, putPresentation } from '../lib/store'
@@ -44,9 +47,24 @@ import { Badge, Button, Empty, IconButton, Segmented } from '../components/ui/pr
 import { Confirm, Modal, toast } from '../components/ui/overlay'
 import { AnimationScene } from '../components/anim/Scene'
 import { Timeline } from '../components/anim/Timeline'
-import { AddLayerButton, AddSeriesButton, LayerInspector, SceneInspector, SeriesInspector } from '../components/anim/inspectors'
+import {
+  AddAnnotationButton,
+  AddLayerButton,
+  AddSegmentButton,
+  AddSeriesButton,
+  AnnotationInspector,
+  LayerInspector,
+  SceneInspector,
+  SegmentInspector,
+  SeriesInspector,
+} from '../components/anim/inspectors'
 
-type Target = { kind: 'layer'; id: string } | { kind: 'series'; id: string } | { kind: 'scene' }
+type Target =
+  | { kind: 'layer'; id: string }
+  | { kind: 'series'; id: string }
+  | { kind: 'segment'; id: string }
+  | { kind: 'annotation'; id: string }
+  | { kind: 'scene' }
 
 function NumInput({
   value,
@@ -635,6 +653,66 @@ export default function Studio() {
               <AddSeriesButton onAdd={(s) => { patch({ ...anim, series: [...anim.series, s] }); setTarget({ kind: 'series', id: s.id }) }} />
             </div>
           </div>
+
+          <div className="surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl">
+            <div className="flex items-center gap-2 border-b border-hairline px-3 py-2">
+              <Ruler className="size-3.5 text-ink-3" />
+              <h2 className="text-2xs font-black uppercase tracking-wide text-ink-3">پاره‌خط‌ها و نشانه‌ها</h2>
+              <span className="ms-auto text-2xs tabular-nums text-ink-3">
+                {toFaDigits((anim.segments?.length ?? 0) + (anim.annotations?.length ?? 0))}
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 space-y-1 overflow-y-auto scroll-thin p-2">
+              {(anim.segments ?? []).map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => setTarget({ kind: 'segment', id: g.id })}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-start transition',
+                    target.kind === 'segment' && target.id === g.id
+                      ? 'border-brand/60 bg-brand-soft/60'
+                      : 'border-transparent hover:bg-sunken',
+                  )}
+                >
+                  <MoveRight className="size-3 shrink-0 text-ink-3" />
+                  <span className="min-w-0 flex-1 truncate text-xs font-bold text-ink-2">پاره‌خط</span>
+                  <span className="size-2.5 shrink-0 rounded-full" style={{ background: g.color }} />
+                </button>
+              ))}
+              {(anim.annotations ?? []).map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => setTarget({ kind: 'annotation', id: a.id })}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-xl border px-2.5 py-1.5 text-start transition',
+                    target.kind === 'annotation' && target.id === a.id
+                      ? 'border-brand/60 bg-brand-soft/60'
+                      : 'border-transparent hover:bg-sunken',
+                  )}
+                >
+                  <Braces className="size-3 shrink-0 text-ink-3" />
+                  <span className="min-w-0 flex-1 truncate text-xs font-bold text-ink-2">{a.label || 'آکولاد'}</span>
+                  <span className="size-2.5 shrink-0 rounded-full" style={{ background: a.color ?? '#2563eb' }} />
+                </button>
+              ))}
+              <AddSegmentButton
+                anim={anim}
+                onAdd={(g) => {
+                  patch({ ...anim, segments: [...(anim.segments ?? []), g] })
+                  setTarget({ kind: 'segment', id: g.id })
+                }}
+              />
+              <AddAnnotationButton
+                anim={anim}
+                onAdd={(a) => {
+                  patch({ ...anim, annotations: [...(anim.annotations ?? []), a] })
+                  setTarget({ kind: 'annotation', id: a.id })
+                }}
+              />
+            </div>
+          </div>
         </aside>
 
         {/* ---------- centre: stage + transport + timeline ---------- */}
@@ -852,6 +930,7 @@ export default function Studio() {
               series={series}
               index={anim.series.findIndex((s) => s.id === series.id)}
               t={t}
+              duration={anim.duration}
               panelOptions={scenePanels(anim).filter((p) => p.id)}
               onChange={patchSeries}
               onRemove={() => {
@@ -859,6 +938,32 @@ export default function Studio() {
                 patch({ ...anim, series: rest })
                 if (rest.length === 0) setTarget({ kind: 'scene' })
               }} />
+            )}
+            {target.kind === 'segment' && (
+              <SegmentInspector
+                segment={(anim.segments ?? []).find((g) => g.id === target.id) ?? (anim.segments ?? [])[0]}
+                anim={anim}
+                onChange={(next) =>
+                  patch({ ...anim, segments: (anim.segments ?? []).map((g) => (g.id === next.id ? next : g)) })
+                }
+                onRemove={() => {
+                  patch({ ...anim, segments: (anim.segments ?? []).filter((g) => g.id !== target.id) })
+                  setTarget({ kind: 'scene' })
+                }}
+              />
+            )}
+            {target.kind === 'annotation' && (
+              <AnnotationInspector
+                annotation={(anim.annotations ?? []).find((a) => a.id === target.id) ?? (anim.annotations ?? [])[0]}
+                anim={anim}
+                onChange={(next) =>
+                  patch({ ...anim, annotations: (anim.annotations ?? []).map((a) => (a.id === next.id ? next : a)) })
+                }
+                onRemove={() => {
+                  patch({ ...anim, annotations: (anim.annotations ?? []).filter((a) => a.id !== target.id) })
+                  setTarget({ kind: 'scene' })
+                }}
+              />
             )}
             {target.kind === 'series' && !series && (
               <div className="space-y-3 p-3">

@@ -138,7 +138,7 @@ function tokenize(src: string): { toks: Tok[]; error?: string } {
 
 type Node =
   | { k: 'const'; v: number }
-  | { k: 'var' }
+  | { k: 'var'; name: string }
   | { k: 'neg'; a: Node }
   | { k: 'bin'; op: string; a: Node; b: Node }
   | { k: 'call'; name: string; args: Node[] }
@@ -147,10 +147,13 @@ class Parser {
   private i = 0
   private toks: Tok[]
   private src: string
+  /** extra variable names this expression may reference */
+  private vars: Set<string>
 
-  constructor(toks: Tok[], src: string) {
+  constructor(toks: Tok[], src: string, vars: Set<string> = new Set()) {
     this.toks = toks
     this.src = src
+    this.vars = vars
   }
 
   private peek(): Tok | undefined {
@@ -257,7 +260,8 @@ class Parser {
         }
         return { k: 'call', name, args }
       }
-      if (t.v === 't' || t.v === 'time' || t.v === 'زمان') return { k: 'var' }
+      if (t.v === 't' || t.v === 'time' || t.v === 'زمان') return { k: 'var', name: 't' }
+      if (this.vars.has(t.v)) return { k: 'var', name: t.v }
       if (t.v in CONSTS) return { k: 'const', v: CONSTS[t.v] }
       return `نام ناشناخته «${t.v}» — فقط t و توابع ریاضی مجازند`
     }
@@ -265,19 +269,19 @@ class Parser {
   }
 }
 
-function build(node: Node): ExprFn {
+function build(node: Node, names: Record<string, ExprFn> = {}): ExprFn {
   switch (node.k) {
     case 'const':
       return () => node.v
     case 'var':
       return (t: number) => t
     case 'neg': {
-      const a = build(node.a)
+      const a = build(node.a, names)
       return (t) => -a(t)
     }
     case 'bin': {
-      const a = build(node.a)
-      const b = build(node.b)
+      const a = build(node.a, names)
+      const b = build(node.b, names)
       const op = node.op
       if (op === '+') return (t) => a(t) + b(t)
       if (op === '-') return (t) => a(t) - b(t)
@@ -288,7 +292,7 @@ function build(node: Node): ExprFn {
     }
     case 'call': {
       const fn = FUNCS[node.name]
-      const args = node.args.map(build)
+      const args = node.args.map((a) => build(a, names))
       return (t) => fn(...args.map((f) => f(t)))
     }
   }
@@ -297,15 +301,28 @@ function build(node: Node): ExprFn {
 const cache = new Map<string, ExprFn | null>()
 
 /** Compile with memoisation. Returns `null` for an empty/invalid formula. */
-export function compile(src: string): ExprFn | null {
-  const key = src.trim()
+export function compile(src: string, vars?: Record<string, string>): ExprFn | null {
+  const key = vars && Object.keys(vars).length ? `${JSON.stringify(vars)}::${src.trim()}` : src.trim()
+  if (!vars || !Object.keys(vars).length) {
+    if (!key) return null
+    if (cache.has(key)) return cache.get(key) ?? null
+  }
   if (!key) return null
-  if (cache.has(key)) return cache.get(key) ?? null
-  const { toks, error } = tokenize(key)
-  const parsed = error ? null : new Parser(toks, key).parse()
-  const fn: ExprFn | null = parsed === null ? null : typeof parsed === 'string' ? null : build(parsed)
+  const { toks, error } = tokenize(src.trim())
+  const parsed = error ? null : new Parser(toks, src.trim(), new Set(Object.keys(vars ?? {}))).parse()
+  const fn: ExprFn | null = parsed === null ? null : typeof parsed === 'string' ? null : build(parsed, buildVars(vars))
   cache.set(key, fn)
   return fn
+}
+
+/** Each local variable is itself a function of `t`, so they can reference t. */
+function buildVars(vars?: Record<string, string>): Record<string, ExprFn> {
+  const out: Record<string, ExprFn> = {}
+  for (const name of Object.keys(vars ?? {})) {
+    const inner = compile(vars![name])
+    if (inner) out[name] = inner
+  }
+  return out
 }
 
 /** Validate without throwing — used for live editor feedback. */
@@ -323,8 +340,8 @@ export function check(src: string): CompileResult {
 }
 
 /** Evaluate defensively — non-finite results collapse to `fallback`. */
-export function evalExpr(src: string, t: number, fallback = 0): number {
-  const fn = compile(src)
+export function evalExpr(src: string, t: number, fallback = 0, vars?: Record<string, string>): number {
+  const fn = compile(src, vars)
   if (!fn) return fallback
   let v: number
   try {

@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Eye, Plus, Trash2 } from 'lucide-react'
 import type { AnimLayer, AnimPanel, AnimSeries, Animation, SlideStep, StepKind } from '../../types'
 import { KIND_ACCENT, KIND_LABEL, SCHEMA_VERSION, emptyAnimation, newLayer, newSeries, uid } from '../../types'
 import { cn, toFaDigits } from '../../lib/utils'
+import type { Timed } from '../../lib/anim/engine'
 
 const BLOCK_KINDS: StepKind[] = ['text', 'list', 'formula', 'callout', 'trap', 'image', 'video', 'code', 'quiz', 'animation']
 import { Badge, Button, Field, IconButton, Input, Segmented, Select, Switch, Textarea } from '../ui/primitives'
@@ -363,9 +364,189 @@ function AnimationFields({ anim, onChange }: { anim: Animation; onChange: (a: An
         ))}
       </div>
 
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-2xs font-black text-ink-3">
+            پاره‌خط‌ها و نشانه‌ها ({toFaDigits((anim.segments?.length ?? 0) + (anim.annotations?.length ?? 0))})
+          </span>
+          <Button
+            size="xs"
+            variant="subtle"
+            icon={Plus}
+            className="ms-auto"
+            disabled={anim.layers.length < 2}
+            onClick={() =>
+              onChange({
+                ...anim,
+                segments: [
+                  ...(anim.segments ?? []),
+                  { id: uid('seg'), fromLayer: anim.layers[0].id, toLayer: anim.layers[1].id, color: '#e11d48', width: 3 },
+                ],
+              })
+            }
+          >
+            پاره‌خط
+          </Button>
+          <Button
+            size="xs"
+            variant="subtle"
+            icon={Plus}
+            disabled={anim.layers.length < 1}
+            onClick={() =>
+              onChange({
+                ...anim,
+                annotations: [
+                  ...(anim.annotations ?? []),
+                  {
+                    id: uid('ann'),
+                    kind: 'brace',
+                    from: { layer: anim.layers[0].id },
+                    to: { layer: anim.layers[1]?.id ?? anim.layers[0].id },
+                    orientation: 'auto',
+                    label: 'Δt',
+                    side: 1,
+                  },
+                ],
+              })
+            }
+          >
+            آکولاد
+          </Button>
+        </div>
+        {(anim.segments ?? []).map((g, i) => (
+          <div key={g.id} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-sunken/60 p-1.5">
+            <input type="color" value={g.color} onChange={(e) => setAt(anim.segments ?? [], i, { ...g, color: e.target.value })} className="size-7 rounded border border-hairline" aria-label="رنگ پاره‌خط" />
+            <Select
+              value={g.fromLayer}
+              onChange={(e) => setAt(anim.segments ?? [], i, { ...g, fromLayer: e.target.value })}
+              className="h-8 w-28 text-xs"
+              aria-label="از جسم"
+            >
+              {anim.layers.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={g.toLayer ?? ''}
+              onChange={(e) => setAt(anim.segments ?? [], i, { ...g, toLayer: e.target.value || undefined })}
+              className="h-8 w-28 text-xs"
+              aria-label="تا جسم"
+            >
+              <option value="">— نقطهٔ ثابت —</option>
+              {anim.layers.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Select>
+            <WindowInputs item={g} onChange={(n) => setAt(anim.segments ?? [], i, n)} />
+            <IconButton
+              icon={Trash2}
+              label="حذف پاره‌خط"
+              size="sm"
+              onClick={() => onChange({ ...anim, segments: (anim.segments ?? []).filter((_, j) => j !== i) })}
+            />
+          </div>
+        ))}
+        {(anim.annotations ?? []).map((a, i) => (
+          <div key={a.id} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-sunken/60 p-1.5">
+            <Input
+              value={a.label}
+              onChange={(e) => setAt(anim.annotations ?? [], i, { ...a, label: e.target.value })}
+              className="h-8 w-20 text-xs"
+              aria-label="برچسب"
+            />
+            <Select
+              value={a.from.layer ?? ''}
+              onChange={(e) => setAt(anim.annotations ?? [], i, { ...a, from: { ...a.from, layer: e.target.value || undefined } })}
+              className="h-8 w-28 text-xs"
+              aria-label="از جسم"
+            >
+              <option value="">— نقطهٔ ثابت —</option>
+              {anim.layers.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={a.to.layer ?? ''}
+              onChange={(e) => setAt(anim.annotations ?? [], i, { ...a, to: { ...a.to, layer: e.target.value || undefined } })}
+              className="h-8 w-28 text-xs"
+              aria-label="تا جسم"
+            >
+              <option value="">— نقطهٔ ثابت —</option>
+              {anim.layers.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={a.orientation}
+              onChange={(e) => setAt(anim.annotations ?? [], i, { ...a, orientation: e.target.value as never })}
+              className="h-8 w-24 text-xs"
+              aria-label="جهت"
+            >
+              <option value="auto">خودکار</option>
+              <option value="horizontal">افقی</option>
+              <option value="vertical">عمودی</option>
+            </Select>
+            <WindowInputs item={a} onChange={(n) => setAt(anim.annotations ?? [], i, n)} />
+            <IconButton
+              icon={Trash2}
+              label="حذف نشانه"
+              size="sm"
+              onClick={() => onChange({ ...anim, annotations: (anim.annotations ?? []).filter((_, j) => j !== i) })}
+            />
+          </div>
+        ))}
+      </div>
+
       <Hint>برای کار کامل با صحنه (کی‌فریم، مسیر، بردار) کادر را در ارائه بگذارید و «استودیوی انیمیشن» را بزنید.</Hint>
     </div>
   )
+}
+
+
+/** replace one item in a list without touching the rest */
+function setAt<T extends { id: string }>(list: T[], i: number, next: T): T[] {
+  return list.map((x, j) => (j === i ? next : x))
+}
+
+/** the four timing knobs, kept to one compact line in a dense editor */
+function WindowInputs<T extends Timed>({ item, onChange }: { item: T; onChange: (next: T) => void }) {
+  const put = (k: keyof Timed, v: number) => {
+    const next: Timed = { ...item }
+    if (!v) delete next[k]
+    else next[k] = v
+    onChange(next as T)
+  }
+  return (
+    <>
+      {(['visibleFrom', 'visibleTo', 'fadeIn', 'fadeOut'] as const).map((k) => (
+        <Input
+          key={k}
+          type="number"
+          step={0.5}
+          value={(item[k] as number | undefined) ?? 0}
+          onChange={(e) => put(k, Number(e.target.value))}
+          className="h-8 w-16 text-xs"
+          aria-label={WINDOW_LABEL[k]}
+          title={WINDOW_LABEL[k]}
+        />
+      ))}
+    </>
+  )
+}
+
+const WINDOW_LABEL: Record<string, string> = {
+  visibleFrom: 'از ثانیه',
+  visibleTo: 'تا ثانیه',
+  fadeIn: 'محو ورود',
+  fadeOut: 'محو خروج',
 }
 
 const SHAPE_LABEL: Record<string, string> = { circle: 'دایره', square: 'مربع', triangle: 'مثلث', arrow: 'پیکان', car: 'خودرو', ball: 'توپ' }
@@ -392,6 +573,7 @@ function LayerRow({ layer, onChange, onRemove }: { layer: AnimLayer; onChange: (
       <Input type="number" step={0.5} value={x} onChange={(e) => put('x', Number(e.target.value))} className={cn(t, 'w-16')} aria-label="x" />
       <Input type="number" step={0.5} value={y} onChange={(e) => put('y', Number(e.target.value))} className={cn(t, 'w-16')} aria-label="y" />
       <Input type="number" step={0.05} value={size} onChange={(e) => put('size', Number(e.target.value))} className={cn(t, 'w-16')} aria-label="اندازه" />
+      <WindowInputs item={layer} onChange={onChange} />
       <IconButton icon={Trash2} label="حذف شیء" size="sm" onClick={onRemove} />
     </div>
   )
@@ -406,6 +588,7 @@ function SeriesRow({ series, onChange, onRemove }: { series: AnimSeries; onChang
       <input type="color" value={series.color} onChange={(e) => onChange({ ...series, color: e.target.value })} className="size-7 rounded border border-hairline" aria-label="رنگ" />
       <Switch checked={series.reveal} onChange={(v) => onChange({ ...series, reveal: v })} label="تدریجی" />
       <Switch checked={!!series.tangent} onChange={(v) => onChange({ ...series, tangent: v })} label="مماس" />
+      <WindowInputs item={series} onChange={onChange} />
       <IconButton icon={Trash2} label="حذف منحنی" size="sm" onClick={onRemove} />
     </div>
   )

@@ -156,7 +156,10 @@ export function layerPos(layer: AnimLayer, t: number, lookup?: SeriesLookup, dur
     return { x: t, y: Number.isFinite(v ?? NaN) ? (v as number) : 0 }
   }
   if (layer.mode === 'expr') {
-    return { x: evalExpr(layer.exprX, t, 0), y: evalExpr(layer.exprY, t, 0) }
+    // Local parameters (`{ dt: 'max(0, 3.5 - t)' }`) make a shrinking window
+    // expressible without hand-keyframing a curve.
+    const vars = layer.exprParams
+    return { x: evalExpr(layer.exprX, t, 0, vars), y: evalExpr(layer.exprY, t, 0, vars) }
   }
   return { x: sampleKeys(layer.tracks.x, t, 0), y: sampleKeys(layer.tracks.y, t, 0) }
 }
@@ -377,6 +380,57 @@ export function fitDomains(anim: Animation): Pick<AnimScene, 'xMin' | 'xMax' | '
     yMin: yLo - pad,
     yMax: yHi + pad,
   }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Visibility windows
+ * ------------------------------------------------------------------ */
+
+/** Anything that can appear and disappear on a schedule. */
+export type Timed = {
+  visibleFrom?: number
+  visibleTo?: number
+  fadeIn?: number
+  fadeOut?: number
+}
+
+/**
+ * Opacity multiplier for a time window: 0 outside, ramping across the fades.
+ *
+ * This is what lets a lesson *sequence* itself — braces arrive at 1.5 s and
+ * leave at 3 s — without duplicating every element and keyframing opacity by
+ * hand.
+ */
+export function windowOpacity(w: Timed | undefined, t: number, duration: number): number {
+  if (!w) return 1
+  const from = w.visibleFrom ?? 0
+  const to = w.visibleTo ?? duration
+  if (t < from - 1e-9 || t > to + 1e-9) return 0
+  const fin = Math.max(0, w.fadeIn ?? 0)
+  const fout = Math.max(0, w.fadeOut ?? 0)
+  let k = 1
+  if (fin > 0 && t < from + fin) k = Math.min(k, (t - from) / fin)
+  if (fout > 0 && t > to - fout) k = Math.min(k, (to - t) / fout)
+  return Math.max(0, Math.min(1, k))
+}
+
+/** Is this element on screen at all right now? */
+export function inWindow(w: Timed | undefined, t: number, duration: number): boolean {
+  return windowOpacity(w, t, duration) > 0.001
+}
+
+/** A point that may be fixed, or attached to another body. */
+export type Anchor = { layer?: string; point?: { x: number; y: number } }
+
+/** Resolve an anchor to scene units at time `t`. */
+export function anchorPos(a: Anchor, t: number, lookup?: SeriesLookup, layers?: AnimLayer[]): { x: number; y: number } | null {
+  if (a.layer && layers) {
+    const l = layers.find((x) => x.id === a.layer)
+    if (l) return layerPos(l, t, lookup)
+  }
+  if (a.point) return { ...a.point }
+  if (a.layer) return { x: t, y: 0 }
+  return null
 }
 
 /* ------------------------------------------------------------------ *

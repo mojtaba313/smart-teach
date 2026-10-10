@@ -63,6 +63,40 @@ export const ANIM_SHAPE_LABEL: Record<AnimShape, string> = {
   ball: 'توپ',
 }
 
+/** A straight line between two bodies — the secant, a beam, a tether. */
+export type AnimSegment = {
+  id: string
+  fromLayer: string
+  toLayer?: string
+  toPoint?: { x: number; y: number }
+  color: string
+  dashed?: boolean
+  width?: number
+  /** label the line with its slope (Δy/Δx) */
+  showSlope?: boolean
+  visibleFrom?: number
+  visibleTo?: number
+  fadeIn?: number
+  fadeOut?: number
+}
+
+/** A brace or a labelled span between two points — the Δt and Δx markers. */
+export type AnimAnnotation = {
+  id: string
+  kind: 'brace' | 'span' | 'text'
+  from: { layer?: string; point?: { x: number; y: number } }
+  to: { layer?: string; point?: { x: number; y: number } }
+  orientation: 'horizontal' | 'vertical' | 'auto'
+  label: string
+  color?: string
+  /** which side of the line the brace sits on */
+  side?: 1 | -1
+  visibleFrom?: number
+  visibleTo?: number
+  fadeIn?: number
+  fadeOut?: number
+}
+
 /**
  * A moving object. Position is either hand-keyframed, driven by an
  * expression of `t` (what physics lessons actually need), or slaved to a
@@ -88,6 +122,11 @@ export type AnimLayer = {
    * you describe the shape once and the object travels it.
    */
   path?: AnimPath
+  /** پنجرهٔ دیده‌شدن بر حسب ثانیه (پیش‌فرض: همیشه) */
+  visibleFrom?: number
+  visibleTo?: number
+  fadeIn?: number
+  fadeOut?: number
   /** keyframes used when mode === 'key' */
   tracks: Partial<Record<AnimProp, AnimKey[]>>
   showTrail: boolean
@@ -97,11 +136,13 @@ export type AnimLayer = {
   vectorScale: number
   label?: string
   /**
-   * Position vector: an arrow from a fixed point to the object. `from` is the
-   * anchor in scene units (`origin` means (0, 0)); the arrow is drawn without
-   * hand-rotating anything, so it cannot end up mirrored below the axis.
+   * Position vector: an arrow from a fixed point (or another body) to this
+   * one. Drawn without hand-rotating anything, so it cannot end up mirrored
+   * below the axis.
    */
   positionVector?: PositionVector
+  /** local variables for `exprX`/`exprY`, e.g. `{ dt: "max(0, 3.5 - t)" }` */
+  exprParams?: Record<string, string>
   /**
    * Velocity/acceleration arrows, drawn from the object's edge outward so the
    * object never hides them.
@@ -127,8 +168,8 @@ export type AnimPath = {
 
 /** An arrow anchored to a fixed point and pointing at a moving object. */
 export type PositionVector = {
-  /** anchor in scene units; `origin` is (0, 0) */
-  from: 'origin' | { x: number; y: number }
+  /** anchor: the origin, a fixed point, or another body */
+  from: 'origin' | { x: number; y: number } | { layer: string }
   color?: string
   label?: string
   /** px per scene unit; falls back to a sensible auto length */
@@ -179,6 +220,11 @@ export type AnimSeries = {
   window?: number | string
   /** panel id; defaults to the first panel */
   panel?: string
+  /** پنجرهٔ دیده‌شدن بر حسب ثانیه (پیش‌فرض: همیشه) */
+  visibleFrom?: number
+  visibleTo?: number
+  fadeIn?: number
+  fadeOut?: number
 }
 
 /**
@@ -235,6 +281,10 @@ export type Animation = {
   scene: AnimScene
   layers: AnimLayer[]
   series: AnimSeries[]
+  /** lines between bodies */
+  segments?: AnimSegment[]
+  /** braces and labelled spans */
+  annotations?: AnimAnnotation[]
   /** live x / v / a readout while playing */
   readout: boolean
 }
