@@ -1,0 +1,90 @@
+// Prisma schema — PostgreSQL is the real store behind the app.
+//
+// Postgres rather than SQLite because this is a teaching library that grows:
+// one deck can carry a hundred questions and their answer keys, several
+// teachers may add to the same bank, and searching inside an answer key needs
+// full-text search rather than a LIKE. Arrays are native, and JSONB keeps a
+// slide's blocks as a document that is still queryable.
+
+// The classic generator writes into node_modules/@prisma/client, which Next
+// keeps out of its server bundle via `serverExternalPackages`. A generated
+// source tree inside `src/` would get compiled by the bundler instead.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Presentation {
+  id          String   @id
+  title       String
+  description String   @default("")
+  theme       String   @default("light")
+  layout      String   @default("flow")
+  schema      Int      @default(2)
+  /// the whole Presentation object; JSONB so blocks stay queryable
+  data        Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  progress   Progress?
+  quizBlocks QuizLink[]
+
+  @@index([updatedAt])
+}
+
+model Question {
+  id          String   @id
+  stem        String
+  options     String[]
+  answerIndex Int      @default(0)
+  explanation String   @default("")
+  /// ordered path segments, root first
+  tags        String[] @default([])
+  source      String   @default("")
+  year        Int?
+  /// 1 (very easy) … 5 (very hard)
+  difficulty  Int      @default(3)
+  starred     Boolean  @default(false)
+  used        Int      @default(0)
+  /// AnswerKey: { title?, steps: SlideStep[] } — a full teaching slide
+  answerKey   Json?
+  /// Figures for the stem and the options: { questionBlocks, optionBlocks }
+  figure      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  quizBlocks QuizLink[]
+
+  @@index([difficulty])
+  @@index([starred])
+  @@index([source, year])
+  @@index([tags], type: Gin)
+}
+
+/// A quiz block inside a deck that mirrors a question from the bank. The link
+/// is what lets the presenter show that question's answer key.
+model QuizLink {
+  id           String @id
+  stepId       String
+  presentation String
+  question     String
+
+  deck     Presentation @relation(fields: [presentation], references: [id], onDelete: Cascade)
+  question_ Question    @relation(fields: [question], references: [id], onDelete: Cascade)
+
+  @@unique([stepId, presentation])
+  @@index([presentation])
+}
+
+model Progress {
+  /// presentation id
+  presentationId String   @id
+  /// global step index the teacher stopped at
+  step           Int
+  updatedAt      DateTime @updatedAt
+
+  deck Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+}

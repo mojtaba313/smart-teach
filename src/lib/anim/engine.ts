@@ -1,4 +1,4 @@
-import type { AnimKey, AnimLayer, AnimPanel, AnimProp, AnimScene, Animation, AnimSeries, Interp } from '../../types'
+import type { AnimKey, AnimLayer, AnimPanel, AnimPath, AnimProp, AnimScene, Animation, AnimSeries, Interp } from '../../types'
 import { evalExpr } from './expr'
 import { clamp } from '../utils'
 
@@ -85,8 +85,72 @@ export type LayerState = {
 
 const DEFAULT_SIZE = 6
 
-/** Position of a layer — keyframed, formula-driven, or riding a curve. */
-export function layerPos(layer: AnimLayer, t: number, lookup?: SeriesLookup): { x: number; y: number } {
+/**
+ * Point at fraction `u` of a path's arc length.
+ *
+ * Constant arc-length speed, not constant vertex speed: without this a shape
+ * with unevenly spaced points would visibly speed up on the long segments,
+ * and that single artefact makes an otherwise clean loop look broken.
+ */
+export function pathPointAt(path: AnimPath, u: number): { x: number; y: number } | null {
+  const pts = path.points ?? []
+  if (pts.length === 0) return null
+  if (pts.length === 1) return { ...pts[0] }
+  const segs = path.closed ? pts.length : pts.length - 1
+  const lens: number[] = []
+  let total = 0
+  for (let i = 0; i < segs; i += 1) {
+    const a = pts[i]
+    const b = pts[(i + 1) % pts.length]
+    const d = Math.hypot(b.x - a.x, b.y - a.y)
+    lens.push(d)
+    total += d
+  }
+  if (total <= 0) return { ...pts[0] }
+  let want = Math.min(Math.max(u, 0), 1) * total
+  for (let i = 0; i < segs; i += 1) {
+    if (want <= lens[i] || i === segs - 1) {
+      const f = lens[i] > 0 ? want / lens[i] : 0
+      const a = pts[i]
+      const b = pts[(i + 1) % pts.length]
+      return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f }
+    }
+    want -= lens[i]
+  }
+  return { ...pts[pts.length - 1] }
+}
+
+/** Pixels per scene unit on the horizontal axis — what a click radius means. */
+export function sceneUnit(anim: Animation): number {
+  const duration = animationDuration(anim)
+  const spanX = Math.max(1e-6, (anim.scene.plotSpace === 'time' ? duration : anim.scene.xMax) - (anim.scene.plotSpace === 'time' ? 0 : anim.scene.xMin))
+  return 1000 / spanX
+}
+
+/**
+ * The path as an SVG path, in **view-box pixels**.
+ *
+ * The mapping has to be the panel's: scene units mean something different in
+ * every panel, and a raw data-space polyline would land wherever the origin
+ * happens to be.
+ */
+export function pathPolyline(
+  path: AnimPath,
+  sx: (v: number) => number,
+  sy: (v: number) => number,
+): string {
+  const pts = path.points ?? []
+  if (pts.length < 2) return ''
+  const d = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${sx(p.x).toFixed(2)} ${sy(p.y).toFixed(2)}`).join(' ')
+  return path.closed ? `${d} L ${sx(pts[0].x).toFixed(2)} ${sy(pts[0].y).toFixed(2)} Z` : d
+}
+
+/** Position of a layer — keyframed, formula-driven, riding a curve or a path. */
+export function layerPos(layer: AnimLayer, t: number, lookup?: SeriesLookup, duration = 0): { x: number; y: number } {
+  if (layer.mode === 'path' && layer.path) {
+    const p = pathPointAt(layer.path, duration > 0 ? t / duration : 0)
+    if (p) return p
+  }
   if (layer.mode === 'follow' && layer.follow && lookup) {
     const v = lookup(layer.follow, t)
     return { x: t, y: Number.isFinite(v ?? NaN) ? (v as number) : 0 }
@@ -97,9 +161,9 @@ export function layerPos(layer: AnimLayer, t: number, lookup?: SeriesLookup): { 
   return { x: sampleKeys(layer.tracks.x, t, 0), y: sampleKeys(layer.tracks.y, t, 0) }
 }
 
-export function layerState(layer: AnimLayer, t: number, lookup?: SeriesLookup): LayerState {
+export function layerState(layer: AnimLayer, t: number, lookup?: SeriesLookup, duration = 0): LayerState {
   const props = layer.tracks
-  const p = layerPos(layer, t, lookup)
+  const p = layerPos(layer, t, lookup, duration)
   return {
     ...p,
     size: sampleKeys(props.size, t, DEFAULT_SIZE),
@@ -430,4 +494,32 @@ export function keyframeExtent(anim: Animation): number {
     }
   }
   return max
+}
+
+/**
+ * Is this animation really just a picture?
+ *
+ * A diagram that happens to be built out of shapes has nothing to animate: no
+ * keyframes, no moving series, no formula. Playback chrome and a transport
+ * bar around it are noise, so such a block should present itself as an image —
+ * the same block type either way, so existing decks keep working and an
+ * animation that later gains a keyframe becomes a player again by itself.
+ */
+export function isStaticAnimation(anim: Animation): boolean {
+  const hasSeries = anim.series.some((s) => s.visible && s.expr.trim())
+  if (hasSeries) return false
+  const layers = anim.layers.filter((l) => l.visible)
+  if (layers.length === 0) return false
+  return layers.every((l) => {
+    if (l.mode !== 'key') return false
+    if (l.showVelocity || l.showAcceleration) return false
+    // A track is static when every key in it holds the same value. Two keys
+    // at the same number is still a picture; two keys at different numbers is
+    // motion, however small.
+    return Object.values(l.tracks ?? {}).every((keys) => {
+      const list = (keys ?? []) as AnimKey[]
+      if (list.length === 0) return true
+      return list.every((k) => k.v === list[0].v)
+    })
+  })
 }

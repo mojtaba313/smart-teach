@@ -175,7 +175,7 @@ function q(patch: Partial<BankQuestion> & { stem: string; options: string[]; ans
     id: uid('q'),
     explanation: '',
     tags: [],
-    difficulty: 2,
+    difficulty: 1,
     source: '',
     starred: false,
     createdAt: now,
@@ -200,7 +200,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'حرکت شتابدار', 'نمودار سرعت-زمان'],
       source: 'کنکور ریاضی فیزیک — حرکت‌شناسی',
       year: 1402,
-      difficulty: 3,
+      difficulty: 1,
     }),
     q({
       stem: 'اگر نمودار مکان-زمان یک جسم یک **خط مستقیم** باشد، کدام گزینه درست است؟',
@@ -215,7 +215,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'حرکت یکنواخت', 'نمودار مکان-زمان'],
       source: 'کنکور ریاضی فیزیک — حرکت‌شناسی',
       year: 1401,
-      difficulty: 1,
+      difficulty: 2,
     }),
     q({
       stem: 'در یک پرتابه با $v_0 = ۲۰ \\ \\mathrm{m/s}$ و $\\theta = ۳۰^\\circ$، سرعت در **نقطهٔ اوج** چقدر است؟ ($g = ۱۰ \\ \\mathrm{m/s^2}$)',
@@ -230,7 +230,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'پرتابه', 'نقطه اوج'],
       source: 'کنکور ریاضی فیزیک — حرکت‌شناسی',
       year: 1400,
-      difficulty: 3,
+      difficulty: 2,
     }),
     q({
       stem: 'در نوسان ساده هماهنگ، اختلاف فاز بین نمودار مکان و نمودار سرعت چقدر است؟',
@@ -250,7 +250,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'سرعت و تندی'],
       source: 'کنکور ریاضی فیزیک — حرکت‌شناسی',
       year: 1402,
-      difficulty: 2,
+      difficulty: 3,
     }),
     q({
       stem: 'یک جسم روی سطح افقی بدون اصطکاک حرکت می‌کند و نیروی $۳ \\ \\mathrm{N}$ به آن وارد می‌شود؛ جرم $۱ \\ \\mathrm{kg}$ است. شتاب چقدر است؟',
@@ -259,7 +259,7 @@ export function seedQuestionBank(): BankQuestion[] {
       explanation: 'از دومین نیوتن $F = ma$ پس $a = F/m = ۳$.',
       tags: ['آزمون', 'دینامیک', 'قانون دوم نیوتن'],
       source: 'آزمون میان‌ترم دهم',
-      difficulty: 1,
+      difficulty: 3,
       starred: true,
     }),
     q({
@@ -273,7 +273,7 @@ export function seedQuestionBank(): BankQuestion[] {
       answerIndex: 0,
       explanation: 'تندهٔ خطی $v = r\\omega$ است؛ با برابر بودن $\\omega$، هرچه شعاع بزرگ‌تر باشد تنده بیشتر است.',
       tags: ['آزمون', 'حرکت دایره‌ای', 'تنده زاویه‌ای'],
-      difficulty: 2,
+      difficulty: 3,
     }),
     q({
       stem: 'دقت اندازه‌گیری $۰٫۱ \\ \\mathrm{cm}$ یعنی بیشترین خطای نسبی چقدر است؟',
@@ -281,7 +281,7 @@ export function seedQuestionBank(): BankQuestion[] {
       answerIndex: 3,
       explanation: 'خطای نسبی به مقدار خوانده‌شده بستگی دارد، پس بدون عدد خوانده‌شده نمی‌توان درصد داد.',
       tags: ['آزمون', 'اندازه‌گیری', 'دقت و خطا'],
-      difficulty: 2,
+      difficulty: 4,
       starred: true,
     }),
     q({
@@ -292,7 +292,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'حرکت شتابدار', 'فرمول‌های حرکت'],
       source: 'کنکور ریاضی فیزیک',
       year: 1399,
-      difficulty: 2,
+      difficulty: 4,
     }),
     q({
       stem: 'در $۳ \\ \\mathrm{s}$ نخست یک جسم شتاب‌دار، جابه‌جایی‌اش $۹ \\ \\mathrm{m}$ است. اگر از سکون شروع کرده باشد، شتاب چقدر است؟',
@@ -302,7 +302,7 @@ export function seedQuestionBank(): BankQuestion[] {
       tags: ['کنکور', 'حرکت شناسی', 'حرکت شتابدار', 'فرمول‌های حرکت'],
       source: 'کنکور ریاضی فیزیک',
       year: 1398,
-      difficulty: 2,
+      difficulty: 5,
     }),
   ]
 }

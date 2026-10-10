@@ -1,3 +1,5 @@
+'use client'
+
 import { useSyncExternalStore } from 'react'
 import type { BankQuestion, Presentation, QuestionBank } from '../types'
 import {
@@ -6,6 +8,7 @@ import {
   duplicatePresentation,
   importBank,
   importPresentations,
+  invalidateCaches,
   loadBank,
   loadPresentations,
   saveBank,
@@ -73,6 +76,13 @@ export function copyPresentation(id: string): Presentation | undefined {
   const copy = duplicatePresentation(id)
   presStore.set(loadPresentations())
   return copy
+}
+
+/** Re-read the cache after the database reconciliation. */
+export function refreshStores() {
+  invalidateCaches()
+  presStore.set(loadPresentations())
+  bankStore.set(loadBank())
 }
 
 export function ingestPresentations(input: unknown): Presentation[] {

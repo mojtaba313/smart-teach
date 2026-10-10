@@ -1,4 +1,4 @@
-import type { Animation, AnimLayer, AnimSeries } from '../../types'
+import type { Animation, AnimLayer, AnimPath, AnimSeries } from '../../types'
 import { newKey, newLayer, newSeries, uid } from '../../types'
 
 const SERIES_COLORS = ['#2563eb', '#e11d48', '#059669', '#c026d3', '#d97706', '#0891b2']
@@ -278,6 +278,31 @@ const emptyScene = (): Animation => ({
   series: [],
   readout: true,
 })
+
+/**
+ * Non-physics motions. The formula mode is great at `t*t` and pointless for a
+ * loop or a figure-eight, so these carry a drawn path instead.
+ */
+export const PATH_PRESETS = [
+  {
+    label: 'دایرهٔ کامل',
+    path: { closed: true, points: Array.from({ length: 13 }, (_, i) => ({ x: Math.cos((i / 12) * 2 * Math.PI) * 5, y: Math.sin((i / 12) * 2 * Math.PI) * 5 })) },
+  },
+  {
+    label: 'رقم ۸',
+    path: {
+      closed: true,
+      points: Array.from({ length: 33 }, (_, i) => {
+        const t = (i / 32) * 2 * Math.PI
+        return { x: Math.sin(t) * 5, y: Math.sin(2 * t) * 3 }
+      }),
+    },
+  },
+  {
+    label: 'چرخ‌فلک عمودی',
+    path: { closed: false, points: [{ x: -6, y: 0 }, { x: 0, y: 6 }, { x: 6, y: 0 }, { x: 0, y: -6 }] },
+  },
+] satisfies { label: string; path: AnimPath }[]
 
 export const PRESETS: Preset[] = [
   { id: 'vt', label: 'سرعت-زمان', blurb: 'شتاب ثابت: v و x با هم', build: vtUniform },

@@ -1,3 +1,5 @@
+'use client'
+
 import { Keyboard } from 'lucide-react'
 import { useHotkeyIndex } from '../../lib/hotkeys'
 import { prettyCombo } from '../../lib/utils'

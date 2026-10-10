@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Crosshair, Eye, EyeOff, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react'
+import { Crosshair, Eye, EyeOff, LineChart, Plus, Shapes, Sparkles, Trash2, Wand2 } from 'lucide-react'
 import type { AnimPanel, Animation, AnimLayer, AnimSeries, AnimShape, SeriesStyle } from '../../types'
 import {
   ANIM_PROPS,
@@ -14,7 +14,8 @@ import {
 } from '../../types'
 import { check, EXPR_EXAMPLES, EXPR_FUNCS } from '../../lib/anim/expr'
 import { currentValue, fitDomains, scenePanels, seriesLookupOf, withoutKey, withKey } from '../../lib/anim/engine'
-import { cn, parseNum, round, toFaDigits } from '../../lib/utils'
+import { PATH_PRESETS } from '../../lib/anim/presets'
+import { cn, parseNum, pick, round, toFaDigits } from '../../lib/utils'
 import { Badge, Button, Field, IconButton, Input, Segmented, Select, Switch } from '../ui/primitives'
 
 /** A sensible starting vertical domain for the n-th panel of an animation. */
@@ -191,6 +192,10 @@ export function LayerInspector({
   const set = <K extends keyof AnimLayer>(k: K, v: AnimLayer[K]) => onChange({ ...layer, [k]: v })
   const seriesOptions = anim.series.map((s) => ({ value: s.id, label: s.label || s.expr }))
   const panelOptions = scenePanels(anim).filter((p) => p.id)
+  const patchPath = (i: number, patch: { x?: number; y?: number }) => {
+    const path = layer.path ?? { points: [] }
+    set('path', { ...path, points: path.points.map((pt, j) => (j === i ? { ...pt, ...patch } : pt)) })
+  }
 
   return (
     <>
@@ -244,6 +249,7 @@ export function LayerInspector({
             { value: 'key', label: 'کی‌فریم' },
             { value: 'expr', label: 'فرمول' },
             { value: 'follow', label: 'روی نمودار' },
+            { value: 'path', label: 'مسیر' },
           ]}
         />
 
@@ -257,6 +263,64 @@ export function LayerInspector({
                 {EXPR_FUNCS.slice(0, 14).join(' · ')}
               </span>
             </p>
+          </div>
+        )}
+
+        {layer.mode === 'path' && (
+          <div className="space-y-2 rounded-xl bg-sunken/60 p-2.5">
+            <Field label="نقاط مسیر" hint="با کلیک روی صحنه اضافه می‌شود">
+              <span className="text-2xs text-ink-3">
+                {layer.path?.points.length ? `${toFaDigits(layer.path.points.length)} نقطه` : 'هنوز نقطه‌ای نیست'}
+              </span>
+            </Field>
+            <div className="max-h-40 space-y-1 overflow-y-auto scroll-thin pe-0.5">
+              {(layer.path?.points ?? []).map((pt, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <span className="w-5 shrink-0 text-center font-mono text-2xs text-ink-3">{toFaDigits(i + 1)}</span>
+                  <Num value={pt.x} step={0.5} onChange={(v) => patchPath(i, { x: v })} />
+                  <Num value={pt.y} step={0.5} onChange={(v) => patchPath(i, { y: v })} />
+                  <IconButton
+                    icon={Trash2}
+                    label={`حذف نقطهٔ ${i + 1}`}
+                    size="sm"
+                    onClick={() => set('path', { ...(layer.path ?? { points: [] }), points: (layer.path?.points ?? []).filter((_, j) => j !== i) })}
+                  />
+                </div>
+              ))}
+            </div>
+            <Switch
+              checked={!!layer.path?.closed}
+              onChange={(v) => set('path', { ...(layer.path ?? { points: [] }), closed: v })}
+              label="مسیر بسته است (حلقه)"
+            />
+            <Switch
+              checked={layer.path?.show !== false}
+              onChange={(v) => set('path', { ...(layer.path ?? { points: [] }), show: v })}
+              label="نمایش مسیر روی صحنه"
+            />
+            {layer.path?.points.length ? (
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => set('path', undefined)}
+              >
+                حذف مسیر
+              </Button>
+            ) : (
+              <>
+                <p className="text-[10px] leading-4 text-ink-3">
+                  حالت «مسیر» را انتخاب کنید و بعد روی صحنه کلیک کنید تا مسیر را
+                  نقطه‌به‌نقطه رسم کنید. برای حلقه، انتهای مسیر را روی نقطهٔ اول ببندید.
+                </p>
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {PATH_PRESETS.map((p) => (
+                    <Button key={p.label} size="xs" variant="subtle" onClick={() => set('path', { ...p.path })}>
+                      {p.label}
+                    </Button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -596,6 +660,32 @@ export function SceneInspector({ anim, onChange }: { anim: Animation; onChange: 
   const set = <K extends keyof Animation>(k: K, v: Animation[K]) => onChange({ ...anim, [k]: v })
   const panelCount = Math.max(1, scene.panels?.length ?? 1)
   const panels: AnimPanel[] = scene.panels ?? [panelDefaults(anim, 0)]
+  const isGraph = scene.showAxes || scene.showGrid
+
+  /** Figure mode: a free plane with no axes, framed on what is in it. */
+  const toFigure = () => {
+    const fit = fitDomains(anim)
+    const cx = (fit.xMin + fit.xMax) / 2
+    const cy = (fit.yMin + fit.yMax) / 2
+    const half = Math.max(Math.abs(fit.xMax - fit.xMin) / 2, Math.abs(fit.yMax - fit.yMin) / 2) * 1.35 || 10
+    onChange({
+      ...anim,
+      scene: {
+        ...scene,
+        plotSpace: 'free',
+        showAxes: false,
+        showGrid: false,
+        xMin: round(cx - half, 1),
+        xMax: round(cx + half, 1),
+        yMin: round(cy - half, 1),
+        yMax: round(cy + half, 1),
+      },
+    })
+  }
+  const toGraph = () => {
+    const fit = fitDomains(anim)
+    onChange({ ...anim, scene: { ...scene, plotSpace: 'time', showAxes: true, showGrid: true, ...pick(fit, ['xMin', 'xMax', 'yMin', 'yMax']) } })
+  }
 
   const setPanelCount = (n: number) => {
     if (n <= 1) return setScene('panels', undefined)
@@ -621,6 +711,32 @@ export function SceneInspector({ anim, onChange }: { anim: Animation; onChange: 
         <Switch checked={anim.loop} onChange={(v) => set('loop', v)} label="تکرار بی‌نهایت" />
         <Switch checked={anim.autoplay} onChange={(v) => set('autoplay', v)} label="پخش خودکار" />
         <Switch checked={anim.readout} onChange={(v) => set('readout', v)} label="نمایش مقدارهای زنده" />
+      </Section>
+
+      <Section title="حالت صحنه">
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            size="xs"
+            variant={isGraph ? 'subtle' : 'primary'}
+            icon={LineChart}
+            onClick={() => toGraph()}
+          >
+            نمودار (محور و شبکه)
+          </Button>
+          <Button
+            size="xs"
+            variant={isGraph ? 'primary' : 'subtle'}
+            icon={Shapes}
+            onClick={() => toFigure()}
+          >
+            صحنهٔ شکل‌ها (بدون محور)
+          </Button>
+        </div>
+        <p className="text-[10px] leading-4 text-ink-3">
+          شکل‌های بارِدار، مدارها و شکل‌های هندسی به محور و شبکه نیازی ندارند.
+          حالت شکل، محور و شبکه را خاموش و فضا را آزاد می‌کند و بازهٔ دید را روی
+          شکل‌های موجود می‌چیند — برای ذرات بار‌دار، مدارها و شکل‌های هندسی.
+        </p>
       </Section>
 
       <Section

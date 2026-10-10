@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Prisma / database
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-*
+
+# local env (DATABASE_URL and anything else private)
+.env
+.env.*
+!.env.example

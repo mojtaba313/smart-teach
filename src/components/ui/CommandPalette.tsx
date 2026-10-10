@@ -1,3 +1,5 @@
+'use client'
+
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { CornerDownLeft, Search } from 'lucide-react'

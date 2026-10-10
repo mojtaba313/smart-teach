@@ -1,24 +1,15 @@
-import type {
-  AnimLayer,
-  AnimSeries,
-  Animation,
-  BankQuestion,
-  BlockSpan,
-  Presentation,
-  QuestionBank,
-  Slide,
-  SlideStep,
-  StepKind,
-} from './types'
-import {
-  KIND_LABEL,
-  SCHEMA_VERSION,
-  blankPresentation,
-  defaultSpanFor,
-  emptyAnimation,
-  splitTags,
-  uid,
-} from './types'
+'use client'
+
+import type { BankQuestion, Presentation, QuestionBank } from './types'
+import { api, push } from './lib/sync'
+import { arr, isNum, isStr } from './model/migrate'
+import { migrateAnswerKey, migratePresentation, migrateQuestion } from './model/migrate'
+
+// The normalisation rules live in `model/migrate.ts` so the Route Handlers can
+// share them; they are re-exported here because that is where callers expect
+// them.
+export { migrateAnswerKey, migratePresentation, migrateQuestion }
+import { SCHEMA_VERSION, blankPresentation, uid } from './types'
 
 const K_PRES = 'smart-teach:presentations:v2'
 const K_BANK = 'smart-teach:question-bank:v1'
@@ -45,142 +36,13 @@ function writeJSON(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value))
 }
 
-function isStr(v: unknown): v is string {
-  return typeof v === 'string'
-}
 
-function isNum(v: unknown): v is number {
-  return typeof v === 'number' && Number.isFinite(v)
-}
 
-function arr<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : []
-}
+/**
+ * The answer key is a slide, so it goes through the same migration as deck
+ * blocks: an animation block in it must not be dropped because it looks odd.
+ */
 
-const SPANS: BlockSpan[] = ['full', 'half', 'third']
-
-/* ------------------------------------------------------------------ *
- *  Migration — v1 (no schema, id-less steps) → v2
- * ------------------------------------------------------------------ */
-
-function migrateStep(raw: unknown): SlideStep | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  const declared = isStr(r.kind) ? r.kind : ''
-  // An unknown kind is kept as prose rather than dropped — losing a teacher's
-  // content silently is far worse than losing its presentation.
-  const kind: StepKind = declared in KIND_LABEL ? (declared as StepKind) : 'text'
-  const span: BlockSpan = SPANS.includes(r.span as BlockSpan) ? (r.span as BlockSpan) : defaultSpanFor(kind)
-  const id = isStr(r.id) && r.id ? r.id : uid('step')
-  const value = isStr(r.value) ? r.value : declared ? `[${declared}] ${isStr(r.value) ? r.value : JSON.stringify(r)}` : ''
-
-  switch (kind) {
-    case 'list':
-      return { id, span, kind, items: arr<unknown>(r.items).filter(isStr), ordered: r.ordered === true }
-    case 'quiz':
-      return {
-        id,
-        span,
-        kind,
-        question: isStr(r.question) ? r.question : '',
-        options: arr<unknown>(r.options).filter(isStr),
-        answerIndex: isNum(r.answerIndex) ? r.answerIndex : 0,
-        explanation: isStr(r.explanation) ? r.explanation : undefined,
-        bankId: isStr(r.bankId) ? r.bankId : undefined,
-      }
-    case 'callout':
-      return {
-        id,
-        span,
-        kind,
-        value,
-        tone: (r.tone as 'info') && ['info', 'tip', 'warn', 'idea'].includes(r.tone as string)
-          ? (r.tone as 'info' | 'tip' | 'warn' | 'idea')
-          : 'info',
-      }
-    case 'animation': {
-      // Animation payloads are owned by the studio; anything unrecognised
-      // falls back to a blank scene rather than crashing the deck.
-      const base = emptyAnimation()
-      const a = r.anim && typeof r.anim === 'object' ? (r.anim as Record<string, unknown>) : {}
-      const anim: Animation = {
-        ...base,
-        ...(a as Partial<Animation>),
-        scene: { ...base.scene, ...((a.scene as object) ?? {}) },
-        layers: Array.isArray(a.layers) ? (a.layers as AnimLayer[]) : base.layers,
-        series: Array.isArray(a.series) ? (a.series as AnimSeries[]) : base.series,
-      }
-      return { id, span, kind, anim }
-    }
-    case 'image':
-      return { id, span, kind, value, alt: isStr(r.alt) ? r.alt : undefined, caption: isStr(r.caption) ? r.caption : undefined }
-    case 'video':
-    case 'code':
-      return { id, span, kind, value, caption: isStr(r.caption) ? r.caption : undefined }
-    default:
-      return { id, span, kind, value } as SlideStep
-  }
-}
-
-function migrateSlide(raw: unknown, i: number): Slide | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  const steps = arr<unknown>(r.steps)
-    .map(migrateStep)
-    .filter((s): s is SlideStep => s !== null)
-  return {
-    id: isStr(r.id) && r.id ? r.id : `slide-${i}`,
-    title: isStr(r.title) ? r.title : `بخش ${i + 1}`,
-    steps,
-    notes: isStr(r.notes) ? r.notes : '',
-  }
-}
-
-export function migratePresentation(raw: unknown): Presentation | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  const slides = arr<unknown>(r.slides).map(migrateSlide).filter((s): s is Slide => s !== null)
-  if (slides.length === 0) return null
-  return {
-    schema: SCHEMA_VERSION,
-    id: isStr(r.id) && r.id ? r.id : uid('pres'),
-    title: isStr(r.title) && r.title ? r.title : 'بدون عنوان',
-    description: isStr(r.description) ? r.description : '',
-    theme: r.theme === 'dark' || r.theme === 'paper' ? r.theme : 'light',
-    layout: r.layout === 'stack' ? 'stack' : 'flow',
-    slides,
-    createdAt: isNum(r.createdAt) ? r.createdAt : Date.now(),
-    updatedAt: isNum(r.updatedAt) ? r.updatedAt : Date.now(),
-  }
-}
-
-export function migrateQuestion(raw: unknown): BankQuestion | null {
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  if (!isStr(r.stem) || !r.stem.trim()) return null
-  const options = arr<unknown>(r.options).filter(isStr)
-  const rawTags = Array.isArray(r.tags)
-    ? r.tags.filter(isStr)
-    : isStr(r.tags)
-      ? splitTags(r.tags)
-      : []
-  const answerIndex = isNum(r.answerIndex) ? Math.max(0, Math.min(r.answerIndex, Math.max(0, options.length - 1))) : 0
-  return {
-    id: isStr(r.id) && r.id ? r.id : uid('q'),
-    stem: r.stem,
-    options,
-    answerIndex,
-    explanation: isStr(r.explanation) ? r.explanation : '',
-    tags: rawTags.map((t) => t.trim()).filter(Boolean),
-    source: isStr(r.source) ? r.source : '',
-    year: isNum(r.year) ? r.year : undefined,
-    difficulty: r.difficulty === 1 || r.difficulty === 2 || r.difficulty === 3 ? r.difficulty : 2,
-    starred: r.starred === true,
-    createdAt: isNum(r.createdAt) ? r.createdAt : Date.now(),
-    updatedAt: isNum(r.updatedAt) ? r.updatedAt : Date.now(),
-    used: isNum(r.used) ? r.used : 0,
-  }
-}
 
 /* ------------------------------------------------------------------ *
  *  Presentations
@@ -241,10 +103,12 @@ export function savePresentation(pres: Presentation): Presentation[] {
   const all = readPresentations()
   const idx = all.findIndex((p) => p.id === stamped.id)
   const next = idx >= 0 ? all.map((p) => (p.id === stamped.id ? stamped : p)) : [...all, stamped]
+  void push('presentations', stamped)
   return persist(next)
 }
 
 export function deletePresentation(id: string): Presentation[] {
+  void api.deletePresentation(id)
   return persist(readPresentations().filter((p) => p.id !== id))
 }
 
@@ -269,6 +133,7 @@ export function importPresentations(input: unknown): Presentation[] {
   if (incoming.length === 0) throw new Error('فایل JSON معتبر نیست')
   const byId = new Map(readPresentations().map((p) => [p.id, p]))
   for (const p of incoming) byId.set(p.id, { ...p, updatedAt: Date.now() })
+  void api.bulkPresentations(incoming)
   return persist([...byId.values()])
 }
 
@@ -293,6 +158,12 @@ export function safeFilename(name: string): string {
  * ------------------------------------------------------------------ */
 
 let bankCache: QuestionBank | null = null
+
+/** Drop the in-memory caches so the next read comes from localStorage. */
+export function invalidateCaches() {
+  presCache = null
+  bankCache = null
+}
 
 export function loadBank(): QuestionBank {
   if (bankCache) return bankCache
@@ -321,6 +192,7 @@ export function saveBank(next: QuestionBank): QuestionBank {
 export function upsertQuestion(q: BankQuestion): QuestionBank {
   const bank = loadBank()
   const stamp: BankQuestion = { ...q, updatedAt: Date.now() }
+  void push('questions', stamp)
   const idx = bank.questions.findIndex((x) => x.id === q.id)
   const questions = idx >= 0 ? bank.questions.map((x) => (x.id === q.id ? stamp : x)) : [...bank.questions, stamp]
   return saveBank({ ...bank, questions })
@@ -328,6 +200,7 @@ export function upsertQuestion(q: BankQuestion): QuestionBank {
 
 export function deleteQuestion(id: string): QuestionBank {
   const bank = loadBank()
+  void api.deleteQuestion(id)
   return saveBank({ ...bank, questions: bank.questions.filter((q) => q.id !== id) })
 }
 

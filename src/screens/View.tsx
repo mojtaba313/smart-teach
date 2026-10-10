@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import Link from 'next/link'
+import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   ArrowLeft,
@@ -25,9 +26,12 @@ import { usePresentations, useQuestions } from '../lib/store'
 import { HELP_COMBOS, registerHotkeys, useHotkeys } from '../lib/hotkeys'
 import { clamp, cn, fmtClock, parseNum, toFaDigits } from '../lib/utils'
 import { spanClass } from '../lib/span'
+import { useNav } from '../lib/nav'
+import { useMounted } from '../lib/useInView'
 import { StepView } from '../components/blocks'
+import { AnswerKeySheet } from '../components/bank/AnswerKeySheet'
 import { Badge, Button, IconButton } from '../components/ui/primitives'
-import { Toasts, toast } from '../components/ui/overlay'
+import { toast } from '../components/ui/overlay'
 import { ShortcutsSheet } from '../components/ui/ShortcutsSheet'
 
 /* ------------------------------------------------------------------ *
@@ -57,8 +61,9 @@ function buildFlat(slides: Presentation['slides']) {
 }
 
 export default function View() {
-  const { id } = useParams()
-  const navigate = useNavigate()
+  const route = useParams<{ id: string }>()
+  const id = route?.id ?? ''
+  const { go: navigate, params } = useNav()
   const questions = useQuestions()
 
   const library = usePresentations()
@@ -68,12 +73,14 @@ export default function View() {
   const { sectionStart, blocks, total } = useMemo(() => buildFlat(slides), [slides])
 
   // Resume straight from the URL or the last saved position — no reset effect.
-  const [current, setCurrent] = useState(() => {
-    const q = parseInt(new URLSearchParams(window.location.search).get('step') ?? '', 10)
-    if (!Number.isNaN(q) && q >= 0) return q
-    const saved = id ? loadProgress(id) : undefined
-    return saved ?? 0
-  })
+  // The search params are read on the client only: Next prerenders this page,
+  // where there is no `window` and no history to replace.
+  // `?step=` wins, then the last saved position, then the start.
+  const deepLink = Number(params.get('step'))
+  const [current, setCurrent] = useState(() =>
+    Number.isFinite(deepLink) && deepLink >= 0 ? deepLink : (id ? (loadProgress(id) ?? 0) : 0),
+  )
+  const hydrated = useMounted()
   const [overview, setOverview] = useState(false)
   const [blackout, setBlackout] = useState(false)
   const [notes, setNotes] = useState(false)
@@ -82,6 +89,8 @@ export default function View() {
   const [elapsed, setElapsed] = useState(0)
   const [score, setScore] = useState({ ok: 0, total: 0 })
   const [jump, setJump] = useState('')
+  /** id of the quiz whose answer key is open, if any */
+  const [answerKey, setAnswerKey] = useState<string | null>(null)
   const [help, setHelp] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
   const [scale, setScale] = useState(1)
@@ -93,10 +102,12 @@ export default function View() {
 
   /* ---- keep the URL and the resume point in sync ---- */
   useEffect(() => {
-    if (!id) return
-    window.history.replaceState(null, '', `${window.location.pathname}?step=${current}`)
+    if (!id || !hydrated) return
+    const next = new URLSearchParams(window.location.search)
+    next.set('step', String(current))
+    window.history.replaceState(null, '', `${window.location.pathname}?${next.toString()}`)
     saveProgress(id, current)
-  }, [id, current])
+  }, [id, current, hydrated])
 
   /* ---- scroll the active block into view ---- */
   useEffect(() => {
@@ -222,8 +233,7 @@ export default function View() {
   if (!pres) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-canvas font-vazir text-ink">
-        <Toasts />
-        <p className="text-lg font-black">ارائه‌ای با این شناسه پیدا نشد.</p>
+          <p className="text-lg font-black">ارائه‌ای با این شناسه پیدا نشد.</p>
         <div className="flex gap-2">
           <Button variant="primary" onClick={() => navigate('/create')}>
             ساخت ارائه
@@ -239,10 +249,9 @@ export default function View() {
   if (slides.length === 0) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-canvas font-vazir">
-        <Toasts />
-        <div className="text-center">
+          <div className="text-center">
           <p className="text-lg font-black text-ink">این ارائه بخشی ندارد.</p>
-          <Link to="/create" className="mt-3 inline-block rounded-xl bg-brand px-4 py-2 text-sm font-black text-on-brand">
+          <Link href="/create" className="mt-3 inline-block rounded-xl bg-brand px-4 py-2 text-sm font-black text-on-brand">
             بازگشت به استودیو
           </Link>
         </div>
@@ -263,7 +272,6 @@ export default function View() {
 
   return (
     <div data-theme={themeName} className="min-h-screen bg-canvas font-vazir text-ink">
-      <Toasts />
 
       <div
         className="cursor-pointer"
@@ -285,7 +293,7 @@ export default function View() {
           onClick={(e) => e.stopPropagation()}
         >
           <Link
-            to={`/create?slide=${slides[0]?.id ?? ''}`}
+            href={`/create?slide=${slides[0]?.id ?? ''}`}
             className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-hairline px-2.5 text-2xs font-black text-ink-2 transition hover:bg-sunken hover:text-ink"
           >
             <Pencil className="size-3.5" />
@@ -353,6 +361,7 @@ export default function View() {
                           interactive
                           autoFocus={isNewestQuiz}
                           quizMeta={linked ? { source: linked.source, tags: linked.tags } : undefined}
+                          onShowAnswerKey={linked?.answerKey ? () => setAnswerKey(step.id) : undefined}
                           onAnswer={(correct: boolean) =>
                             setScore((s) => ({ ok: s.ok + (correct ? 1 : 0), total: s.total + 1 }))
                           }
@@ -367,6 +376,13 @@ export default function View() {
                               : undefined
                           }
                         />
+                        {answerKey === step.id && linked?.answerKey && (
+                          <AnswerKeySheet
+                            answerKey={linked.answerKey}
+                            question={step.kind === 'quiz' ? step.question : undefined}
+                            onClose={() => setAnswerKey(null)}
+                          />
+                        )}
                       </motion.div>
                     )
                   })}
@@ -401,7 +417,7 @@ export default function View() {
                   بانک سؤال
                 </Button>
                 <Link
-                  to="/create"
+                  href="/create"
                   className="inline-flex h-9 items-center gap-2 rounded-xl border border-hairline px-3.5 text-sm font-bold text-ink-2 transition hover:bg-sunken"
                 >
                   <Pencil className="size-4" />

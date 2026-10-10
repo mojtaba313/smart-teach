@@ -26,7 +26,8 @@ import {
   TrapBlock,
   VideoBlock,
 } from './blocks'
-import { AnimationPlayer } from './AnimationBlock'
+import { AnimationFigure, AnimationPlayer } from './AnimationBlock'
+import { isStaticAnimation } from '../../lib/anim/engine'
 
 export type BlockRenderProps = {
   interactive?: boolean
@@ -37,6 +38,8 @@ export type BlockRenderProps = {
   onReviewQuestion?: () => void
   onUnlinkQuestion?: () => void
   quizMeta?: { source?: string; tags?: string[] }
+  /** presenter: opens the question's descriptive answer key */
+  onShowAnswerKey?: () => void
 }
 
 export type BlockMeta = {
@@ -80,10 +83,16 @@ function renderStep(step: SlideStep, props: BlockRenderProps): ReactNode {
           onAnswer={props.onAnswer}
           onReview={props.onReviewQuestion}
           onUnlink={props.onUnlinkQuestion}
+          onShowAnswerKey={props.onShowAnswerKey}
+          questionBlocks={step.questionBlocks}
+          optionBlocks={step.optionBlocks}
         />
       )
     case 'animation':
-      return (
+      // Nothing to animate → present it as a diagram, not as a player.
+      return isStaticAnimation(step.anim) ? (
+        <AnimationFigure anim={step.anim} title={step.anim.title} onOpenStudio={props.onOpenStudio} />
+      ) : (
         <AnimationPlayer anim={step.anim} onOpenStudio={props.onOpenStudio} />
       )
   }

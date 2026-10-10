@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { BlockMath } from 'react-katex'
 import {
+  BookOpenCheck,
   AlertTriangle,
   BadgeCheck,
   Check,
@@ -14,12 +15,13 @@ import {
   TriangleAlert,
   X,
 } from 'lucide-react'
-import type { CalloutTone } from '../../types'
+import type { CalloutTone, SlideStep } from '../../types'
 import { CALLOUT_TONE_LABEL } from '../../types'
 import { cn } from '../../lib/utils'
 import { useInView } from '../../lib/useInView'
 import { Caption, Frame } from './Frame'
 import { RichText, renderRich } from './RichText'
+import { StepView } from './index'
 
 /* ------------------------------------------------------------------ *
  *  Text
@@ -362,6 +364,9 @@ export function QuizBlock({
   onAnswer,
   onReview,
   onUnlink,
+  onShowAnswerKey,
+  questionBlocks,
+  optionBlocks,
   compact,
   autoFocus,
 }: {
@@ -372,6 +377,9 @@ export function QuizBlock({
   interactive?: boolean
   source?: string
   tags?: string[]
+  questionBlocks?: SlideStep[]
+  optionBlocks?: SlideStep[][]
+  onShowAnswerKey?: () => void
   onAnswer?: (correct: boolean, picked: number) => void
   /** shown in the editor: jump back to the bank entry */
   onReview?: () => void
@@ -443,6 +451,17 @@ export function QuizBlock({
         <RichText value={question} />
       </div>
 
+      {/* figures on the stem — a circuit, a trajectory, a charge diagram */}
+      {questionBlocks && questionBlocks.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {questionBlocks.map((b) => (
+            <div key={b.id} className={cn('min-w-0', b.span === 'full' ? '' : b.span === 'half' ? 'sm:w-1/2 sm:inline-block sm:me-1' : 'sm:w-1/3 sm:inline-block sm:me-1')}>
+              <StepView step={b} />
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="mt-3 grid gap-2">
         {options.map((op, i) => {
           if (op === '' && i >= 2) return null
@@ -476,6 +495,14 @@ export function QuizBlock({
               </span>
               <span dir="auto" className="min-w-0 flex-1">
                 {renderRich(op)}
+                {/* an option can carry a figure too — «کدام شکل درست است؟» */}
+                {optionBlocks?.[i] && optionBlocks[i].length > 0 && (
+                  <span className="mt-2 block space-y-2">
+                    {optionBlocks[i].map((b) => (
+                      <StepView key={b.id} step={b} />
+                    ))}
+                  </span>
+                )}
               </span>
               {revealed && isAnswer && <Check className="size-4 shrink-0" />}
               {revealed && isPicked && !isAnswer && <X className="size-4 shrink-0" />}
@@ -495,6 +522,21 @@ export function QuizBlock({
         <p className={cn('mt-3 text-sm font-black', picked === answerIndex ? 'text-ok' : 'text-danger')}>
           {picked === answerIndex ? 'آفرین! درست جواب دادی.' : 'اشکال ندارد — جواب درست سبز شد.'}
         </p>
+      )}
+
+      {/* the answer key is a full walkthrough, so it opens beside the question */}
+      {revealed && onShowAnswerKey && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onShowAnswerKey()
+          }}
+          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-fuchsia-500/12 px-2.5 py-1.5 text-2xs font-black text-fuchsia-700 transition hover:bg-fuchsia-500/20 dark:text-fuchsia-300"
+        >
+          <BookOpenCheck className="size-3.5" />
+          پاسخ‌نامهٔ تشریحی
+        </button>
       )}
 
       {interactive && !revealed && (

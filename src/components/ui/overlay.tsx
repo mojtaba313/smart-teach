@@ -1,3 +1,5 @@
+'use client'
+
 import {
   useCallback,
   useEffect,
@@ -15,6 +17,7 @@ import type { LucideIcon } from 'lucide-react'
 import { AlertTriangle, Check, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { popOverlay, pushOverlay } from '../../lib/hotkeys'
+import { useMounted } from '../../lib/useInView'
 import { Button, IconButton } from './primitives'
 
 /* ------------------------------------------------------------------ *
@@ -122,6 +125,7 @@ export function Modal({
 }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
+  const mounted = useMounted()
   useFocusTrap(panelRef, open)
   useScrollLock(open)
 
@@ -143,6 +147,9 @@ export function Modal({
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, dismissible, onClose])
+
+  // Portals need a DOM, and Next prerenders every page before shipping it.
+  if (!mounted) return null
 
   return createPortal(
     <AnimatePresence>
@@ -285,6 +292,9 @@ export function Toasts() {
   }, [])
 
   const dismiss = useCallback((id: number) => setItems((xs) => xs.filter((x) => x.id !== id)), [])
+  const mounted = useMounted()
+
+  if (!mounted) return null
 
   return createPortal(
     <div
@@ -380,6 +390,7 @@ export function Menu({
 }) {
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
+  const mounted = useMounted()
   /** anchored under the trigger, flipped above when there is no room below */
   const [pos, setPos] = useState<{ top: number; left: number; maxH: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -505,6 +516,8 @@ export function Menu({
   }
 
   const Icon = icon
+
+  if (!mounted) return <button ref={btnRef} type="button" aria-label={label} disabled={disabled} className={cn('inline-flex shrink-0 items-center justify-center rounded-xl', triggerClassName)} />
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookMarked, Check, Filter, Plus, Search, Star, X } from 'lucide-react'
 import type { BankQuestion, Difficulty } from '../../types'
-import { DIFFICULTY_LABEL, TAG_SEP, splitTags, tagPath } from '../../types'
+import { DIFFICULTIES, DIFFICULTY_LABEL, TAG_SEP, splitTags, tagPath } from '../../types'
 import { cn, fuzzyMatch, normalizeFa, toFaDigits } from '../../lib/utils'
 import { Badge, Button, Empty, IconButton, Segmented } from '../ui/primitives'
 import { TagBreadcrumb } from './TagInput'
@@ -76,7 +76,7 @@ export function QuestionCard({
         <TagBreadcrumb tags={question.tags} max={compact ? 3 : 6} />
         {question.source && <span className="text-2xs text-ink-3">{question.source}</span>}
         {question.year && <span className="text-2xs text-ink-3">سال {toFaDigits(question.year)}</span>}
-        {question.difficulty && <Badge tone={question.difficulty === 3 ? 'danger' : question.difficulty === 1 ? 'ok' : 'neutral'}>{DIFFICULTY_LABEL[question.difficulty]}</Badge>}
+        {question.difficulty && <Badge tone={question.difficulty >= 4 ? 'danger' : question.difficulty <= 2 ? 'ok' : 'neutral'}>{DIFFICULTY_LABEL[question.difficulty]}</Badge>}
       </div>
     </>
   )
@@ -244,9 +244,7 @@ function PickerBody({
               onChange={(v) => setDiff(Number(v) as Difficulty | 0)}
               options={[
                 { value: '0', label: 'همه' },
-                { value: '1', label: DIFFICULTY_LABEL[1] },
-                { value: '2', label: DIFFICULTY_LABEL[2] },
-                { value: '3', label: DIFFICULTY_LABEL[3] },
+                ...DIFFICULTIES.map((d) => ({ value: String(d), label: `${toFaDigits(d)}· ${DIFFICULTY_LABEL[d]}` })),
               ]}
             />
             <button

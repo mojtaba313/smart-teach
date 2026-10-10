@@ -10,6 +10,44 @@ import { IconButton } from '../ui/primitives'
 import { AnimationScene } from '../anim/Scene'
 
 /**
+ * An animation with nothing to animate, shown as a diagram.
+ *
+ * Same block, different presentation: no transport, no play/pause, no "R to
+ * restart" — because a static figure that pretends to be a video is worse than
+ * an honest image.
+ */
+export function AnimationFigure({
+  anim,
+  title,
+  className,
+  onOpenStudio,
+}: {
+  anim: Animation
+  title?: string
+  className?: string
+  onOpenStudio?: () => void
+}) {
+  return (
+    <figure
+      onClick={(e) => e.stopPropagation()}
+      className={cn('overflow-hidden rounded-2xl border border-hairline bg-surface shadow-card', className)}
+    >
+      <div className="p-2">
+        <AnimationScene anim={anim} t={0} showLegend={false} />
+      </div>
+      {(title || onOpenStudio) && (
+        <figcaption className="flex items-center gap-2 border-t border-hairline px-3 py-1.5">
+          {title && <span className="min-w-0 flex-1 truncate text-2xs font-bold text-ink-3">{title}</span>}
+          {onOpenStudio && (
+            <IconButton icon={Pencil} label="ویرایش شکل در استودیو" size="sm" onClick={onOpenStudio} />
+          )}
+        </figcaption>
+      )}
+    </figure>
+  )
+}
+
+/**
  * The in-deck player. Self-contained transport, keyboard-driven, and it
  * starts cleanly whenever the presenter reveals the block.
  */

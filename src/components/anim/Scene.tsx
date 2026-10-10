@@ -17,6 +17,7 @@ import {
   ticksFor,
   trailPoints,
   panelTargets,
+  pathPolyline,
 } from '../../lib/anim/engine'
 
 const VW = 1000
@@ -352,6 +353,8 @@ export type SceneDragHandlers = {
   onMove: (x: number, y: number) => void
   /** pointer released */
   onRelease: (x: number, y: number) => void
+  /** a click that did *not* hit a layer — used to draw a path point */
+  onTap?: (x: number, y: number) => void
 }
 
 export type AnimationSceneProps = {
@@ -362,6 +365,8 @@ export type AnimationSceneProps = {
   showLegend?: boolean
   /** enables grabbing and dragging objects — the studio's record mode */
   drag?: SceneDragHandlers
+  /** clicking the scene appends a point to the selected layer's path */
+  pathDraw?: boolean
   /**
    * Used when the cursor is inside this layer's panel but not on the object:
    * with an object selected in the list, you can then just drop it anywhere.
@@ -378,6 +383,7 @@ export const AnimationScene = memo(function AnimationScene({
   onScrub,
   showLegend = true,
   drag,
+  pathDraw,
   fallbackLayerId,
   highlightLayerId,
 }: AnimationSceneProps) {
@@ -437,7 +443,7 @@ export const AnimationScene = memo(function AnimationScene({
 
   /** topmost layer within grabbing distance of the cursor, if any */
   const pickLayer = (px: number, py: number): AnimLayer | null => {
-    const st0 = (l: AnimLayer) => layerState(l, cursorT, lookup)
+    const st0 = (l: AnimLayer) => layerState(l, cursorT, lookup, duration)
     for (const layer of [...activeLayers].reverse()) {
       const st = st0(layer)
       const reach = Math.max(10, (st.size * (vh / Math.max(1, panels.length))) / 2 + 7)
@@ -472,7 +478,7 @@ export const AnimationScene = memo(function AnimationScene({
         viewBox={`0 0 ${vw} ${vh}`}
         // `pan-y` keeps vertical page scrolling alive on touch; a horizontal
         // drag still lands here and scrubs.
-        className={cn('block h-auto w-full touch-pan-y select-none', drag && 'cursor-grab')}
+        className={cn('block h-auto w-full touch-pan-y select-none', pathDraw ? 'cursor-crosshair' : drag && 'cursor-grab')}
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={`صحنهٔ انیمیشن در ثانیهٔ ${t.toFixed(2)}`}
@@ -491,6 +497,9 @@ export const AnimationScene = memo(function AnimationScene({
               return
             }
           }
+          // In path-draw mode a click is a point, not a scrub: dragging the
+          // playhead and drawing must not fight over the same gesture.
+          if (pathDraw) return
           if (!onScrub) return
           scrubFrom(e.clientX, e.currentTarget)
         }}
@@ -511,6 +520,12 @@ export const AnimationScene = memo(function AnimationScene({
             dragLayerId.current = null
             setGrabbed(null)
             drag.onRelease(d.x, d.y)
+            return
+          }
+          if (drag?.onTap) {
+            const { px, py } = clientToView(e.clientX, e.clientY, e.currentTarget)
+            const d = viewToData(px, py)
+            drag.onTap(d.x, d.y)
             return
           }
           if (!onScrub) return
@@ -750,7 +765,7 @@ export const AnimationScene = memo(function AnimationScene({
 
         {/* objects */}
         {activeLayers.map((layer) => {
-          const st = layerState(layer, cursorT, lookup)
+          const st = layerState(layer, cursorT, lookup, duration)
           const v = layerVelocity(layer, cursorT, lookup)
           const a = layerAcceleration(layer, cursorT, lookup)
           const vecScale = layer.vectors?.scale ?? layer.vectorScale
@@ -778,6 +793,17 @@ export const AnimationScene = memo(function AnimationScene({
                 const centre: Px = { x: px, y: py }
                 return (
                   <g key={p.id || 'p0'}>
+                    {/* the path itself: the shape the object travels */}
+                    {layer.mode === 'path' && layer.path && (layer.path.show ?? true) && (
+                      <path
+                        d={pathPolyline(layer.path, sx, p.sy)}
+                        fill="none"
+                        stroke={layer.color}
+                        strokeWidth={1.8}
+                        strokeDasharray="6 6"
+                        opacity={0.5}
+                      />
+                    )}
                     {layer.showTrail && (
                       <polyline
                         points={trailPoints(layer, cursorT, lookup)

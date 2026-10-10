@@ -74,7 +74,7 @@ export type AnimLayer = {
   shape: AnimShape
   color: string
   visible: boolean
-  mode: 'key' | 'expr' | 'follow'
+  mode: 'key' | 'expr' | 'follow' | 'path'
   /** expression of t used when mode === 'expr' */
   exprX: string
   exprY: string
@@ -82,6 +82,12 @@ export type AnimLayer = {
   follow?: string
   /** panel id, or '*' to draw the object in every panel */
   panel?: string
+  /**
+   * Drawn path. Without it, a 2-D motion needs a formula for x *and* y, which
+   * is fine for `t*t` but pointless for a loop, an orbit or a figure-eight:
+   * you describe the shape once and the object travels it.
+   */
+  path?: AnimPath
   /** keyframes used when mode === 'key' */
   tracks: Partial<Record<AnimProp, AnimKey[]>>
   showTrail: boolean
@@ -108,6 +114,15 @@ export type AnimLayer = {
     /** draw the acceleration split into tangential + normal parts */
     decomposition?: boolean
   }
+}
+
+/** A polyline an object can be made to travel, at constant arc-length speed. */
+export type AnimPath = {
+  points: { x: number; y: number }[]
+  /** loop back to the first point instead of stopping */
+  closed?: boolean
+  /** draw the path itself on the scene */
+  show?: boolean
 }
 
 /** An arrow anchored to a fixed point and pointing at a moving object. */
@@ -328,6 +343,17 @@ export type QuizStep = StepBase & {
   explanation?: string
   /** when set, the block mirrors a Question Bank entry */
   bankId?: string
+  /**
+   * Blocks for the stem and for the options.
+   *
+   * Plenty of exam questions carry a figure — a circuit, a trajectory, a
+   * charge diagram. Text alone cannot hold one, and an animation block is the
+   * natural fit: a static one presents as a figure, a moving one as a player.
+   * Both fields are optional and additive, so `question`/`options` keep
+   * working exactly as before.
+   */
+  questionBlocks?: SlideStep[]
+  optionBlocks?: SlideStep[][]
 }
 export type VideoStep = StepBase & { kind: 'video'; value: string; caption?: string }
 export type CodeStep = StepBase & { kind: 'code'; value: string; caption?: string }
@@ -440,13 +466,30 @@ export const SCHEMA_VERSION = 2
  *  Question Bank
  * ------------------------------------------------------------------ */
 
-export type Difficulty = 1 | 2 | 3
+/**
+ * Five levels, because "easy/medium/hard" is not a scale a teacher can plan
+ * with: the two ends matter most — the warm-ups and the ones that separate.
+ */
+export type Difficulty = 1 | 2 | 3 | 4 | 5
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
-  1: 'آسان',
-  2: 'متوسط',
-  3: 'سخت',
+  1: 'خیلی آسان',
+  2: 'آسان',
+  3: 'متوسط',
+  4: 'سخت',
+  5: 'خیلی سخت',
 }
+
+/** One-line teacher-facing description of each level. */
+export const DIFFICULTY_HINT: Record<Difficulty, string> = {
+  1: 'تعریف و حفظ مستقیم از متن — برای شروع و اطمینان',
+  2: 'یک قدم استدلال؛ یا تبدیل یک کمیت به کمیت دیگر',
+  3: 'ترکیب دو نمودار یا دو رابطه؛ نیازمند انتخاب روش',
+  4: 'استدلال چندمرحله‌ای؛ داده کافی هست ولی مسیر پنهان',
+  5: 'مسئلهٔ ترکیبی یا خلاف‌Expectation؛ دام مفهومی جدی',
+}
+
+export const DIFFICULTIES: Difficulty[] = [1, 2, 3, 4, 5]
 
 export const TAG_SEP = ':'
 
@@ -460,6 +503,18 @@ export type BankQuestion = {
   options: string[]
   answerIndex: number
   explanation?: string
+  /**
+   * Descriptive answer key: a whole teaching slide, so the walkthrough can use
+   * every block type — prose, formulas, a diagram, even an animation.
+   */
+  answerKey?: AnswerKey
+  /**
+   * Figures that belong to the question itself: a circuit, a trajectory, a
+   * charge diagram. An `animation` block that has nothing to animate presents
+   * as a figure; one that moves plays.
+   */
+  questionBlocks?: SlideStep[]
+  optionBlocks?: SlideStep[][]
   /** ordered path segments, root first */
   tags: string[]
   source?: string
@@ -475,6 +530,14 @@ export type QuestionBank = {
   schema: number
   questions: BankQuestion[]
   updatedAt: number
+}
+
+/** The blocks of an answer-key walkthrough — same union the deck uses. */
+export type AnswerKey = {
+  /** headline, e.g. «راه‌حل گام‌به‌گام» */
+  title?: string
+  /** steps reuse the deck's block model verbatim, animation included */
+  steps: SlideStep[]
 }
 
 /** `['کنکور','حرکت شناسی','حرکت شتابدار','x']` → `کنکور:حرکت شناسی:حرکت شتابدار:x` */

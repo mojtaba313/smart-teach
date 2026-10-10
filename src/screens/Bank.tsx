@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   ArrowRight,
   BookMarked,
+  Braces,
   Download,
   FileJson,
   Keyboard,
@@ -15,21 +15,21 @@ import {
   Wand2,
 } from 'lucide-react'
 import type { BankQuestion, SlideStep } from '../types'
-import { DIFFICULTY_LABEL, TAG_SEP, splitTags, uid } from '../types'
+import { DIFFICULTIES, DIFFICULTY_LABEL, TAG_SEP, splitTags, uid } from '../types'
 import { ingestBank, putPresentation, putQuestion, removeQuestion, usePresentations, useQuestions } from '../lib/store'
 import { downloadJSON } from '../storage'
 import { HELP_COMBOS, useHotkeys } from '../lib/hotkeys'
+import { useNav } from '../lib/nav'
 import { cn, toFaDigits } from '../lib/utils'
 import { Button, Empty, IconButton, Input, Segmented } from '../components/ui/primitives'
-import { Confirm, Menu, Modal, Toasts, toast, type MenuItem } from '../components/ui/overlay'
+import { Confirm, Menu, Modal, toast, type MenuItem } from '../components/ui/overlay'
 import { ShortcutsSheet } from '../components/ui/ShortcutsSheet'
 import { QuestionCard, TagTree, matchesQuery } from '../components/bank/QuestionPicker'
 import { QuestionEditor } from '../components/bank/QuestionEditor'
 import { seedQuestionBank } from '../sample'
 
 export default function Bank() {
-  const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
+  const { go: navigate, params, setParam } = useNav()
   const questions = useQuestions()
 
   // `/bank?q=کنکور:حرکت شناسی` deep-links straight into a filtered view.
@@ -48,10 +48,8 @@ export default function Bank() {
   // Consume the deep-link param so a refresh doesn't re-apply it over edits.
   useEffect(() => {
     if (!deepLink) return
-    const next = new URLSearchParams(params)
-    next.delete('q')
-    setParams(next, { replace: true })
-  }, [deepLink, params, setParams])
+    setParam('q', null)
+  }, [deepLink, setParam])
 
   const results = useMemo(
     () =>
@@ -120,7 +118,6 @@ export default function Bank() {
 
   return (
     <div className="min-h-screen bg-canvas font-vazir text-ink">
-      <Toasts />
 
       <header className="sticky top-0 z-40 flex flex-wrap items-center gap-2 border-b border-hairline bg-surface/92 px-3 py-2 backdrop-blur">
         <button
@@ -142,6 +139,9 @@ export default function Bank() {
         </div>
 
         <div className="ms-auto flex items-center gap-1.5">
+          <Button size="sm" variant="subtle" icon={Braces} onClick={() => navigate('/bank/import')}>
+            ورود گروهی با پیش‌نمایش
+          </Button>
           <IconButton icon={Download} label="خروجی JSON" size="sm" onClick={() => downloadJSON({ questions }, 'question-bank')} />
           <IconButton icon={Upload} label="ورودی JSON" size="sm" onClick={() => fileRef.current?.click()} />
           <IconButton icon={Keyboard} label="کلیدهای میان‌بر" size="sm" onClick={() => setHelp(true)} />
@@ -207,9 +207,7 @@ export default function Bank() {
               onChange={(v) => setDiff(Number(v))}
               options={[
                 { value: '0', label: 'همه' },
-                { value: '1', label: DIFFICULTY_LABEL[1] },
-                { value: '2', label: DIFFICULTY_LABEL[2] },
-                { value: '3', label: DIFFICULTY_LABEL[3] },
+                ...DIFFICULTIES.map((d) => ({ value: String(d), label: `${toFaDigits(d)}· ${DIFFICULTY_LABEL[d]}` })),
               ]}
             />
             <button
@@ -344,7 +342,7 @@ function DeckPicker({
   question: BankQuestion | null
   onClose: () => void
 }) {
-  const navigate = useNavigate()
+  const { go: navigate } = useNav()
   const decks = usePresentations()
 
   const insert = (id: string) => {

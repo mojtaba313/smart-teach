@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 
 /**
  * Is this element on screen? Powers "don't animate what nobody can see":
@@ -28,4 +28,21 @@ export function useInView<T extends HTMLElement>(margin = '160px') {
   }, [margin])
 
   return [ref, inView] as const
+}
+/**
+ * True only after the first client render.
+ *
+ * Overlays portal into `document.body`, which does not exist while Next
+ * prerenders a page — rendering them only on the client is also what keeps
+ * the server HTML and the first client render identical.
+ */
+export function useMounted() {
+  // `useSyncExternalStore` is the sanctioned way to branch on "are we on the
+  // client" without a setState-in-effect cascade.
+  const mounted = useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  )
+  return mounted
 }

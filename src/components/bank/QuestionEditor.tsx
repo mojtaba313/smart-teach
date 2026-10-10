@@ -1,7 +1,8 @@
+import { BlockEditor } from '../editor/BlockEditor'
 import { useMemo, useState } from 'react'
 import { Check, Plus, Sparkles, Trash2 } from 'lucide-react'
 import type { BankQuestion, Difficulty } from '../../types'
-import { DIFFICULTY_LABEL, emptyQuestion } from '../../types'
+import { DIFFICULTIES, DIFFICULTY_HINT, DIFFICULTY_LABEL, emptyQuestion } from '../../types'
 import { cn, parseNum, toFaDigits } from '../../lib/utils'
 import { Badge, Button, Field, IconButton, Input, Segmented, Textarea } from '../ui/primitives'
 import { TagInput } from './TagInput'
@@ -192,19 +193,50 @@ export function QuestionEditor({
         </Field>
       </div>
 
+      {/* figures: the stem and each option can carry blocks, animations included */}
+      <div className="space-y-2 rounded-xl border border-hairline bg-sunken/40 p-2.5">
+        <p className="text-2xs font-black text-ink-3">شکلِ صورت سؤال</p>
+        <BlockEditor
+          blocks={draft.questionBlocks ?? []}
+          onChange={(next) => set('questionBlocks', next.length ? next : undefined)}
+          addLabel="افزودن شکل به صورت سؤال"
+          emptyHint="اگر سؤال شکل دارد، اینجا بسازید: یک انیمیشن بی‌حرکت خودش به‌صورت تصویر نمایش داده می‌شود."
+        />
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-hairline bg-sunken/40 p-2.5">
+        <p className="text-2xs font-black text-ink-3">شکلِ گزینه‌ها</p>
+        {draft.options.map((_, i) => (
+          <div key={i} className="space-y-1.5">
+            <p className="text-[10px] font-bold text-ink-3">گزینهٔ {toFaDigits(i + 1)}</p>
+            <BlockEditor
+              blocks={draft.optionBlocks?.[i] ?? []}
+              onChange={(next) => {
+                const all = [...(draft.optionBlocks ?? [])]
+                while (all.length < draft.options.length) all.push([])
+                all[i] = next
+                set('optionBlocks', all)
+              }}
+              addLabel="افزودن شکل به این گزینه"
+              emptyHint="بدون شکل"
+            />
+          </div>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-end gap-3">
         <Field label="سختی">
           <Segmented
             label="سختی"
-            value={String(draft.difficulty ?? 2)}
+            value={String(draft.difficulty ?? 3)}
             onChange={(v) => set('difficulty', Number(v) as Difficulty)}
-            options={[
-              { value: '1', label: DIFFICULTY_LABEL[1] },
-              { value: '2', label: DIFFICULTY_LABEL[2] },
-              { value: '3', label: DIFFICULTY_LABEL[3] },
-            ]}
+            options={DIFFICULTIES.map((d) => ({ value: String(d), label: toFaDigits(d) }))}
           />
         </Field>
+        <p className="pb-2 text-2xs leading-5 text-ink-3">
+          <span className="font-black text-ink-2">{DIFFICULTY_LABEL[draft.difficulty ?? 3]}:</span>{' '}
+          {DIFFICULTY_HINT[draft.difficulty ?? 3]}
+        </p>
         <Button
           type="button"
           variant={draft.starred ? 'primary' : 'outline'}

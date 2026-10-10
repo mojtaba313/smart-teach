@@ -457,6 +457,12 @@ type AnimLayer = {
   label?: string
   /** panel id، یا '*' برای کشیدن در همهٔ پنل‌ها */
   panel?: string
+  /** مسیر رسم‌شده — جایگزینِ فرمول برای حرکت‌های غیرخطی */
+  path?: {
+    points: { x: number; y: number }[]
+    closed?: boolean      // بستن مسیر به‌صورت حلقه
+    show?: boolean        // نمایش خودِ مسیر روی صحنه
+  }
   /** بردار مکان: از یک نقطهٔ ثابت تا خود جسم */
   positionVector?: {
     from: 'origin' | { x: number; y: number }
@@ -525,6 +531,7 @@ type AnimLayer = {
 | `showVelocity`/`showAcceleration` | فلش `v` و `a` با رنگ لایه (و مشکی برای `a`) |
 | `vectorScale` | پیکسل به‌ازای هر واحد/ثانیه. فلش‌ها اگر کوتاه‌تر از ۱۰px شوند اصلاً رسم نمی‌شوند. |
 | `mode: follow` | مختصات = `(t, value of series)`؛ فقط با `plotSpace: 'time'` |
+| `mode: path` | جسم مسیر رسم‌شده را با **سرعت ثابتِ طول قوس** طی می‌کند؛ یعنی `t / duration` روی طول قوس نگاشت می‌شود، نه روی شمارهٔ نقاط. |
 | `positionVector` | پیکان از مبدأ (یا نقطهٔ دلخواه) تا جسم. زاویه‌اش خودکار است، پس هیچ‌وقت آینه‌ای زیر محور نمی‌افتد. |
 
 نکته‌های runtime:
@@ -548,6 +555,11 @@ type BankQuestion = {
   options: string[]
   answerIndex: number          // اینجا کلمپ می‌شود
   explanation?: string
+  /**
+   * پاسخ‌نامهٔ تشریحی: یک اسلاید کامل، پس می‌تواند هر کادری داشته باشد
+   * — از متن و فرمول تا تصویر و انیمیشن. کادرها همان union بند ۶ هستند.
+   */
+  answerKey?: { title?: string; steps: SlideStep[] }
   tags: string[]               // مسیر سلسله‌مراتبی، ریشه اول
   source?: string
   year?: number
@@ -565,7 +577,8 @@ type BankQuestion = {
 | `options` | غیررشته‌ها حذف می‌شوند |
 | `answerIndex` | به بازهٔ `[0, options.length - 1]` کلمپ می‌شود (برخلاف `quiz`) |
 | `tags` | آرایهٔ رشته‌ها، یا رشتهٔ `a:b:c` که با `:` شکسته و trim می‌شود |
-| `difficulty` | غیر از ۱/۲/۳ ⇒ `2` |
+| `difficulty` | عدد ۱ تا ۵؛ بیرون از این بازه ⇒ `3` |
+| `answerKey` | از همان مهاجرت کادرهای اسلاید می‌گذرد؛ اگر `steps` خالی باشد حذف می‌شود |
 | `starred` | فقط `true` دقیقاً |
 
 بانک دو شکل ورودی می‌پذیرد — یک شیء با `questions`، یا آرایهٔ خام:
@@ -597,7 +610,7 @@ type BankQuestion = {
 | `plotSpace` | `time` `free` | `time` |
 | `PresentationTheme` | `light` `dark` `paper` | `light` |
 | `layout` | `flow` `stack` | `flow` |
-| `Difficulty` | `1` `2` `3` | `2` |
+| `Difficulty` | `1` خیلی آسان · `2` آسان · `3` متوسط · `4` سخت · `5` خیلی سخت | `3` |
 
 رنگ‌ها: هر رشتهٔ معتبر CSS. رنگ‌های پیش‌فرض هر کتابخانه در
 `src/lib/anim/presets.ts` و `KIND_ACCENT` در `src/types.ts`.
@@ -727,6 +740,52 @@ function migrateQuestion(raw: unknown): BankQuestion | null
 می‌نویسد و در `id` موجود به‌روزرسانی می‌کند، در غیر این صورت اضافه
 می‌کند. `duplicatePresentation` کپی عمیق با `id` تازه و عنوان
 «… (کپی)» می‌سازد.
+
+### `src/lib/sync.ts`
+
+```ts
+function syncOnBoot(): Promise<void>   // سرور جایگزین کش می‌شود
+function flushPending(): Promise<void>  // خالی‌کردن صف تغییرات آفلاین
+function pushLocalToServer(): Promise<{questions, presentations}>  // یک‌باره، با دکمه
+function pendingCount(): number
+function useSyncState(): SyncState     // 'starting' | 'online' | 'offline'
+const BASE: string                     // VITE_API_URL یا http://localhost:5178
+const api: {
+  health(): Promise<unknown>
+  questions(): Promise<BankQuestion[] | null>
+  saveQuestions(list: unknown[]): Promise<unknown>
+  deleteQuestion(id: string): Promise<unknown>
+  presentations(): Promise<Presentation[] | null>
+  savePresentation(p: Presentation): Promise<unknown>
+  bulkPresentations(list: Presentation[]): Promise<unknown>
+  deletePresentation(id: string): Promise<unknown>
+  saveProgress(id: string, step: number): Promise<unknown>
+  getProgress(id: string): Promise<{ step?: number } | null>
+}
+```
+
+**PostgreSQL منبع حقیقت است.** `syncOnBoot` یک بار در `src/app/BootSync.tsx`
+اجرا می‌شود: سطرهای سرور **جایگزین** کش می‌شوند و بعد `refreshStores()` صدا
+می‌زند. نوشتن‌ها اول در کش می‌نشینند (تا رابط فوری باشد) و سپس به API می‌روند؛
+اگر API در دسترس نباشد، در `smart-teach:pending:v1` صف می‌شوند و در بار بعد
+که سرور جواب داد، به ترتیب خالی می‌شوند.
+
+### سرور (Next Route Handlers + Prisma)
+
+| مسیر | بدنه | کار |
+| --- | --- | --- |
+| `GET /api/health` | — | `{ ok, questions, presentations }` |
+| `GET /api/questions` | — | همهٔ سؤال‌ها |
+| `POST /api/questions` | `BankQuestion[]` | upsert گروهی |
+| `POST /api/questions/bulk` | آرایه یا `{questions}` | `{ saved, rejected: [{index, reason}] }` |
+| `PUT /api/questions/:id` | `BankQuestion` | upsert تکی |
+| `DELETE /api/questions/:id` | — | `{ id }` |
+| `GET /api/presentations` | — | همهٔ ارائه‌ها |
+| `GET/PUT/DELETE /api/presentations/:id` | `Presentation` | — |
+| `POST /api/presentations/bulk` | آرایه | `{ saved }` |
+| `GET/PUT /api/progress/:id` | `{ step }` | آخرین گام ارائه |
+
+همهٔ ورودی‌ها از همان `migrate*` رد می‌شوند، پس سرور و مرورگر یک قانون دارند.
 
 ### `src/lib/store.ts`
 
@@ -889,6 +948,8 @@ localStorage ذخیره می‌کند (debounce ۷۰۰ms) و پس از بستن�
 | طول عنوان هر کادر | بی‌حد؛ ولی متن بلند یعنی ارائه‌دهنده می‌خواند |
 | تعداد کادر در یک بخش | عملی: ۶؛ فراتر از آن در اجرا جا نمی‌شود |
 | گزینه‌های پرسش | رابط تا ۸، کلیدها تا ۱۲ (`1`–`6`, `a`–`f`) |
+| سختی | ۱ تا ۵ |
+| ورود گروهی | `/bank/import` — JSON را می‌پذیرد و پیش از ذخیره پیش‌نمایش می‌دهد |
 | گام‌های قابل پیمایش در اجرا | بدون محدودیت؛ نوار پیشرفت کل ارائه |
 | تصویر/ویدیو | فقط URL — فایل محلی (`file://` یا آدرس نسبی) بارگذاری نمی‌شود |
 | `xTicks`/`yTicks` | هر عددی؛ به «تعداد هدف» تبدیل می‌شود و به عدد گرد شده |

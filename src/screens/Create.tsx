@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   BookMarked,
   Copy,
@@ -44,13 +43,15 @@ import {
 } from '../lib/store'
 import { downloadJSON, safeFilename } from '../storage'
 import { spanClass, spanCols } from '../lib/span'
+import { useNav } from '../lib/nav'
+import { SyncBadge } from '../components/SyncBadge'
 import { cn, moveItem, toFaDigits } from '../lib/utils'
 import { HELP_COMBOS, useHotkeys } from '../lib/hotkeys'
 import { StepView } from '../components/blocks'
 import { BLOCK_KINDS, BLOCK_META } from '../components/blocks'
 import { BlockCard } from '../components/editor/BlockCard'
 import { Badge, Button, Empty, Field, IconButton, Input, Segmented, Select } from '../components/ui/primitives'
-import { Confirm, Menu, Modal, Toasts, toast, type MenuItem } from '../components/ui/overlay'
+import { Confirm, Menu, Modal, toast, type MenuItem } from '../components/ui/overlay'
 import { ShortcutsSheet } from '../components/ui/ShortcutsSheet'
 import { CommandPalette, type Command } from '../components/ui/CommandPalette'
 import { QuestionPicker } from '../components/bank/QuestionPicker'
@@ -70,12 +71,14 @@ function toQuizStep(q: BankQuestion): SlideStep {
     answerIndex: q.answerIndex,
     explanation: q.explanation,
     bankId: q.id,
+    // the question's own figures must survive insertion into a deck
+    questionBlocks: q.questionBlocks,
+    optionBlocks: q.optionBlocks,
   }
 }
 
 export default function Create() {
-  const navigate = useNavigate()
-  const [params, setParams] = useSearchParams()
+  const { go: navigate, params, setParam } = useNav()
   const library = usePresentations()
   const questions = useQuestions()
 
@@ -340,10 +343,8 @@ export default function Create() {
     const want = params.get('slide')
     if (!want) return
     document.getElementById(`slide-${want}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    const next = new URLSearchParams(params)
-    next.delete('slide')
-    setParams(next, { replace: true })
-  }, [params, setParams])
+    setParam('slide', null)
+  }, [params, setParam])
 
   /* ---------------- keyboard ---------------- */
   useHotkeys(
@@ -632,7 +633,6 @@ export default function Create() {
 
   return (
     <div className="min-h-screen bg-canvas font-vazir text-ink">
-      <Toasts />
 
       <a
         href="#deck"
@@ -710,6 +710,7 @@ export default function Create() {
               {stats.quizzes > 0 && <Badge tone="accent">{toFaDigits(stats.quizzes)} پرسش</Badge>}
               {stats.anims > 0 && <Badge tone="brand">{toFaDigits(stats.anims)} انیمیشن</Badge>}
               <Badge>~{toFaDigits(stats.mins)} دقیقه</Badge>
+              <SyncBadge />
             </span>
           </div>
 

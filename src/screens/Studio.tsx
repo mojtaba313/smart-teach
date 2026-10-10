@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import {
   ArrowRight,
@@ -17,6 +17,7 @@ import {
   SkipBack,
   SkipForward,
   Sparkles,
+  Spline,
   Square,
   Undo2,
 } from 'lucide-react'
@@ -27,6 +28,7 @@ import { popOverlay, pushOverlay, useLocalKeys } from '../lib/hotkeys'
 import {
   allKeyframes,
   animationDuration,
+  sceneUnit,
   keyframeExtent,
   layerPos,
   scenePanels,
@@ -36,9 +38,10 @@ import {
   wrapTime,
 } from '../lib/anim/engine'
 import { PRESETS } from '../lib/anim/presets'
+import { useNav } from '../lib/nav'
 import { clamp, cn, round, toFaDigits } from '../lib/utils'
 import { Badge, Button, Empty, IconButton, Segmented } from '../components/ui/primitives'
-import { Confirm, Modal, Toasts, toast } from '../components/ui/overlay'
+import { Confirm, Modal, toast } from '../components/ui/overlay'
 import { AnimationScene } from '../components/anim/Scene'
 import { Timeline } from '../components/anim/Timeline'
 import { AddLayerButton, AddSeriesButton, LayerInspector, SceneInspector, SeriesInspector } from '../components/anim/inspectors'
@@ -72,8 +75,10 @@ function NumInput({
 }
 
 export default function Studio() {
-  const { presId, stepId } = useParams()
-  const navigate = useNavigate()
+  const params = useParams<{ presId: string; slideId: string; stepId: string }>()
+  const presId = params?.presId ?? ''
+  const stepId = params?.stepId ?? ''
+  const { go: navigate } = useNav()
   const library = usePresentations()
   const pres = library.find((p) => p.id === presId)
 
@@ -116,6 +121,8 @@ export default function Studio() {
    */
   const [recording, setRecording] = useState(false)
   const [beat, setBeat] = useState(0.5)
+  /** drawing a path by clicking the scene, rather than dragging the object */
+  const [pathDraw, setPathDraw] = useState(false)
   const [showPresets, setShowPresets] = useState(false)
   const [showHelp, setShowHelp] = useState(false)
   const [confirmDiscard, setConfirmDiscard] = useState(false)
@@ -282,6 +289,24 @@ export default function Studio() {
       return next >= duration ? 0 : next
     })
   }, [beat, duration])
+
+  /** Click-to-add a point on the selected layer's path. */
+  const appendPathPoint = useCallback((layerId: string, x: number, y: number) => {
+    setAnim((prev) => {
+      const next = prev.layers.map((l) => {
+        if (l.id !== layerId) return l
+        const path = l.path ?? { points: [] }
+        const points = [...path.points, { x: round(x, 2), y: round(y, 2) }]
+        // Clicking back on the first point closes the loop — the gesture every
+        // drawing tool uses, and the one people already expect here.
+        const first = path.points[0]
+        const closed = path.closed || (!!first && points.length > 3 && Math.hypot(x - first.x, y - first.y) * sceneUnit(prev) < 12)
+        return { ...l, mode: 'path' as const, path: { ...path, points, closed } }
+      })
+      return { ...prev, layers: next }
+    })
+    setDirty(true)
+  }, [])
 
   /** Wipe the recorded keys of the selected layer back to an empty stage. */
   const clearTake = useCallback(() => {
@@ -527,8 +552,7 @@ export default function Studio() {
   if (!pres || !located || !original || original.kind !== 'animation') {
     return (
       <div className="min-h-screen bg-canvas font-vazir">
-        <Toasts />
-        {head}
+          {head}
         <div className="p-6">
           <Empty
             icon={Sparkles}
@@ -547,7 +571,6 @@ export default function Studio() {
 
   return (
     <div ref={keysRef} className="flex min-h-screen flex-col bg-canvas font-vazir" tabIndex={-1}>
-      <Toasts />
       {head}
 
       <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[15rem_1fr_20rem]">
@@ -654,8 +677,9 @@ export default function Studio() {
               t={t}
               onScrub={seek}
               fallbackLayerId={recording ? selectedLayerId : null}
+              pathDraw={pathDraw}
               drag={
-                recording
+                recording || pathDraw
                   ? {
                       onGrab: (id) => {
                         setSelectedLayerId(id)
@@ -671,6 +695,14 @@ export default function Studio() {
                         recordPose(id, x, y, tRef.current)
                         advance()
                       },
+                      onTap: (x, y) => {
+                        // In path mode a click adds a point instead of moving
+                        // the object: drawing a loop by hand beats typing
+                        // coordinates, and beats two formulas for x and y.
+                        const id = selectedLayerIdRef.current
+                        if (!id) return
+                        appendPathPoint(id, x, y)
+                      },
                     }
                   : undefined
               }
@@ -679,6 +711,13 @@ export default function Studio() {
           </div>
 
           <div className="surface flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2">
+            <IconButton
+              icon={Spline}
+              label={pathDraw ? 'پایان رسم مسیر' : 'رسم مسیر (کلیک روی صحنه)'}
+              size="sm"
+              active={pathDraw}
+              onClick={() => setPathDraw((v) => !v)}
+            />
             <IconButton
               icon={CircleDot}
               label={recording ? 'پایان ضبط' : 'حالت ضبط (R)'}
