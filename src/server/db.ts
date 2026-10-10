@@ -19,17 +19,35 @@ if (!process.env.DATABASE_URL) {
 }
 
 /**
- * One client for the process.
+ * The client is built on first use, not at import time.
  *
- * Prisma 7 takes a driver adapter rather than a URL, so the connection string
- * is read here and handed to the pg adapter — the same DATABASE_URL the CLI
- * migrates with, so there is exactly one place that knows the database.
+ * `next build` imports every Route Handler in order to trace it. If the
+ * connection string were required at module scope, a build on a machine
+ * without a database would fail — and a build must not need a live database.
+ * The throw now happens when someone actually queries, which is the only
+ * moment it can be acted on.
  */
-const url = process.env.DATABASE_URL
-if (!url) throw new Error('DATABASE_URL تنظیم نشده — .env را بسازید یا متغیر محیطی بدهید.')
+let client: PrismaClient | null = null
 
-const adapter = new PrismaPg({ connectionString: url })
+function make(): PrismaClient {
+  const url = process.env.DATABASE_URL
+  if (!url) {
+    throw new Error(
+      'DATABASE_URL تنظیم نشده است. در محیط استقرار این متغیر را با رشتهٔ اتصال PostgreSQL تنظیم کنید.',
+    )
+  }
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) })
+}
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
-export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter })
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    client ??= make()
+    const value = Reflect.get(client as object, prop)
+    return typeof value === 'function' ? value.bind(client) : value
+  },
+})
+
+/** Warm the connection early so the first request is not the one that fails. */
+export function assertDatabase(): void {
+  client ??= make()
+}
