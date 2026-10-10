@@ -23,6 +23,7 @@ function env(over: Partial<EvalEnv> = {}): EvalEnv {
     lt: 0,
     x: 0,
     u: 0,
+    duration: 10,
     v: { a: 2, k: 3, w: 4, v0: 10, شتاب: 9.8 },
     ...over,
   }

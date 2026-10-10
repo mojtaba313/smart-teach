@@ -59,6 +59,8 @@ export type EvalEnv = {
   x: number
   /** The curve parameter, inside a parametric plot. */
   u: number
+  /** The animation's total duration, so `lt / duration` reads naturally. */
+  duration: number
   /** Named values: params, plus anything else the engine binds. */
   v: Record<string, number>
   /**
@@ -94,7 +96,7 @@ export type Scope = {
 }
 
 /** Names available everywhere, without declaring anything. */
-export const BASE_VARS: ReadonlySet<string> = new Set(['t', 'lt', 'x', 'u'])
+export const BASE_VARS: ReadonlySet<string> = new Set(['t', 'lt', 'x', 'u', 'duration'])
 
 /* ------------------------------------------------------------------ *
  *  Lexer
