@@ -694,6 +694,13 @@ function recomputeDependsOnTime(node: CompiledNode): void {
     for (const p of Object.values(node.shape)) if (propTimeDependent(p)) time = true
   }
   if (node.motionPath) time = true
+  // A plot drawn in `x` is static; a traveling wave reading `t` is not, and
+  // missing this makes the wave freeze at its first frame.
+  if (node.plot?.expr?.timeDependent) time = true
+  if (node.plot?.parametric?.x.timeDependent) time = true
+  if (node.plot?.parametric?.y.timeDependent) time = true
+  if (node.text?.k === 'expr' && node.text.timeDependent) time = true
+  if (node.text?.k === 'interp') time = true
   if (node.children) node.children.forEach(recomputeDependsOnTime)
   node.dependsOnTime = time
 }
@@ -788,6 +795,8 @@ export type ResolvedNode = {
   type: Node['type']
   name?: string
   visible: boolean
+  /** Locked nodes are skipped by hit-testing and cannot be dragged. */
+  locked: boolean
   x: number
   y: number
   scaleX: number
@@ -803,6 +812,8 @@ export type ResolvedNode = {
   shape: Record<string, number>
   /** Resolved text, when the node has any. */
   text?: string
+  /** The compiled curve, for a plot node. The renderer needs the expression. */
+  plot?: CompiledPlot
   children: ResolvedNode[]
   raw: Node
   /** True when the node is inside its time window right now. */
@@ -1006,6 +1017,7 @@ function resolveNodeWithEnv(node: CompiledNode, t: number, ctx: Ctx, env: EvalEn
     type: node.type,
     name: node.name,
     visible: node.visible,
+    locked: node.locked,
     x: read(node.transform.x, 0),
     y: read(node.transform.y, 0),
     scaleX: read(node.transform.scaleX, 1),
@@ -1022,6 +1034,7 @@ function resolveNodeWithEnv(node: CompiledNode, t: number, ctx: Ctx, env: EvalEn
     dydt: { x: 0, y: 0 },
   }
 
+  if (node.plot) out.plot = node.plot
   if (style?.fill) out.fill = readColor(style.fill, t)
   if (style?.stroke) out.stroke = readColor(style.stroke, t)
   if (node.text) out.text = readText(node.text, local, ctx, node.id)
@@ -1038,6 +1051,8 @@ function resolveNodeWithEnv(node: CompiledNode, t: number, ctx: Ctx, env: EvalEn
     out.x += at[0]
     out.y += at[1]
   }
+
+  if (node.children) out.children = node.children.map((c) => resolveNodeWithEnv(c, t, ctx, env))
 
   // Velocity for a velocity arrow: exact for keyed tracks, symbolic for
   // formulas. A node that cannot move reports zero rather than sampling noise.

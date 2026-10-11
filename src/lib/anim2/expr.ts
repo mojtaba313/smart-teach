@@ -262,6 +262,9 @@ export const FUNCTIONS: Record<string, { arity: number; fn: Fn; derivable: boole
   sign: { arity: 1, fn: Math.sign, derivable: false },
   // two arguments
   atan2: { arity: 2, fn: Math.atan2, derivable: true },
+  // Degrees are how the subject is taught; radians are how it is computed.
+  deg: { arity: 1, fn: (x: number) => (x * 180) / Math.PI, derivable: true },
+  rad: { arity: 1, fn: (x: number) => (x * Math.PI) / 180, derivable: true },
   hypot: { arity: 2, fn: Math.hypot, derivable: true },
   pow: { arity: 2, fn: Math.pow, derivable: true },
   mod: { arity: 2, fn: mod, derivable: true },
@@ -701,6 +704,10 @@ function dCall(node: Ast & { k: 'call' }): Ast | null {
       return { k: 'un', op: '-', a: div(inner, call('sqrt', [{ k: 'bin', op: '-', a: ONE, b: mul(args[0], args[0], pos), pos }], pos), pos), pos }
     case 'atan':
       return div(inner, { k: 'bin', op: '+', a: ONE, b: mul(args[0], args[0], pos), pos }, pos)
+    case 'deg':
+      return mul(mul(inner, { k: 'num', v: 180, pos }, pos), { k: 'num', v: 1 / Math.PI, pos }, pos)
+    case 'rad':
+      return mul(mul(inner, { k: 'num', v: Math.PI, pos }, pos), { k: 'num', v: 1 / 180, pos }, pos)
     case 'sinh':
       return mul(call('cosh', [args[0]], pos), inner, pos)
     case 'cosh':

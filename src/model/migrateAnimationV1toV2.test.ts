@@ -19,8 +19,8 @@ import { kinematicsLesson } from '../lessons/kinematics'
 import { PRESETS } from '../lib/anim/presets'
 import { layerPos, seriesLookupOf, type SeriesLookup } from '../lib/anim/engine'
 import type { Animation as V1Animation, AnimLayer } from '../types'
-import { migrateAnimationV1toV2 } from './migrateAnimationV1toV2'
-import { compileAnimation, evaluate } from '../lib/anim2/engine'
+import { migrateAnimationV1toV2, timeExprToX } from './migrateAnimationV1toV2'
+import { compileAnimation, evaluate, plotPoints, type ResolvedNode } from '../lib/anim2/engine'
 import type { Animation2 } from '../types/anim2'
 
 /** Every animation that ships in the product today. */
@@ -233,6 +233,21 @@ describe('migration parity: expressions', () => {
   })
 })
 
+/** Find a resolved node anywhere in the tree; v2 nests bodies in axes frames. */
+function findResolved(
+  nodes: ResolvedNode[],
+  id: string,
+): ResolvedNode | undefined {
+  for (const n of nodes) {
+    if (n.id === id) return n
+    if (n.children) {
+      const hit: ResolvedNode | undefined = findResolved(n.children, id)
+      if (hit) return hit
+    }
+  }
+  return undefined
+}
+
 describe('migration parity: derivatives', () => {
   it('agrees with v1 velocity to a couple of digits', () => {
     const v1: V1Animation = {
@@ -273,7 +288,8 @@ describe('migration parity: derivatives', () => {
         (v1Positions(v1, t + h)['expr']!.x - v1Positions(v1, t - h)['expr']!.x) / (2 * h)
       const v1dy =
         (v1Positions(v1, t + h)['expr']!.y - v1Positions(v1, t - h)['expr']!.y) / (2 * h)
-      const body = evaluate(compiled, t).nodes.find((n) => n.id === 'expr')!
+      const frame = evaluate(compiled, t)
+      const body = findResolved(frame.nodes, 'expr')!
       expect(body.dydt.x).toBeCloseTo(v1dx, 2)
       expect(body.dydt.y).toBeCloseTo(v1dy, 2)
     }
@@ -328,5 +344,54 @@ describe('every migrated animation compiles', () => {
     const compiled = compileAnimation(anim)
     expect(compiled.warnings.filter((w) => w.field === 'expression')).toEqual([])
     expect(() => evaluate(compiled, entry.anim.duration / 2)).not.toThrow()
+  })
+})
+describe('series expressions move from time to the axis variable', () => {
+  it('rewrites t to x', () => {
+    expect(timeExprToX('0.5*t^2 - 2*t + 4')).toBe('0.5*x^2 - 2*x + 4')
+  })
+
+  it('leaves longer identifiers alone', () => {
+    // A regex would corrupt `dt` and `atan2`; the tokeniser does not.
+    expect(timeExprToX('dt + atan2(t, 2)')).toBe('dt + atan2(x, 2)')
+    expect(timeExprToX('2t')).toBe('2x')
+  })
+
+  it('rewrites the time alias too', () => {
+    expect(timeExprToX('4*time')).toBe('4*x')
+  })
+
+  it('is a no-op when there is no time in it', () => {
+    expect(timeExprToX('x^2 + 3')).toBe('x^2 + 3')
+  })
+
+  it('leaves a broken formula alone rather than mangling it', () => {
+    expect(timeExprToX('t +')).toBe('t +')
+  })
+
+  it('draws a real curve, not a constant', () => {
+    const v1 = {
+      title: 'x',
+      duration: 4,
+      loop: false,
+      autoplay: false,
+      speed: 1,
+      readout: false,
+      scene: { plotSpace: 'time', xMin: 0, xMax: 4, yMin: 0, yMax: 20, aspect: 0.6, showAxes: true, showGrid: true, xLabel: 't', yLabel: 'x', xTicks: 4, yTicks: 4 },
+      series: [{ id: 's1', label: 'x(t)', expr: '0.5*t^2', color: '#111827', style: 'line', visible: true, reveal: false }],
+      layers: [],
+    } as unknown as V1Animation
+    const { anim } = migrateAnimationV1toV2(v1)
+    const compiled = compileAnimation(anim)
+    const frame = anim.nodes[0] as { children: { id: string; plot?: unknown }[] }
+    const plot = frame.children.find((c) => c.id === 's1')
+    expect(plot).toBeDefined()
+    const pts = plotPoints(
+      (compiled.nodes[0].children ?? []).find((c) => c.id === 's1')!.plot!,
+      0,
+      {},
+    )
+    // y varies with x instead of repeating one value.
+    expect(new Set(pts.map(([, y]) => Math.round(y * 100))).size).toBeGreaterThan(3)
   })
 })

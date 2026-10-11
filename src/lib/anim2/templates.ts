@@ -44,7 +44,7 @@ const T = emptyTransform()
 /**
  * Transform overrides may be written as plain numbers or as bare formula
  * strings, so a template reads like a diagram rather than like type
- * declarations: `{ rotation: 'atan2(vy, vx)' }`.
+ * declarations: `{ rotation: 'deg(atan2(vy, vx))' }`.
  */
 type LooseTransform = Partial<Record<keyof Transform, number | string>>
 
@@ -63,38 +63,40 @@ function withTransform(t?: LooseTransform): Transform {
 }
 
 function rect(over: Over<RectNode>): Node {
-  return { id: over.id ?? uid('n'), type: 'rect', transform: withTransform(over.transform), ...over } as Node
+  // `...over` first: spreading after would put the loose transform back and
+  // throw away the conversion from formula strings to `{expr}`.
+  return { ...over, id: over.id ?? uid('n'), type: 'rect', transform: withTransform(over.transform) } as Node
 }
 
 function ellipse(over: Over<EllipseNode>): Node {
-  return { id: over.id ?? uid('n'), type: 'ellipse', transform: withTransform(over.transform), ...over } as Node
+  return { ...over, id: over.id ?? uid('n'), type: 'ellipse', transform: withTransform(over.transform) } as Node
 }
 
 function line(over: Over<LineNode>): Node {
-  return { id: over.id ?? uid('n'), type: 'line', transform: withTransform(over.transform), ...over } as Node
+  return { ...over, id: over.id ?? uid('n'), type: 'line', transform: withTransform(over.transform) } as Node
 }
 
 function text(over: Over<TextNode>): Node {
-  return { id: over.id ?? uid('n'), type: 'text', transform: withTransform(over.transform), text: '', ...over } as Node
+  return { ...over, id: over.id ?? uid('n'), type: 'text', transform: withTransform(over.transform), text: over.text ?? '' } as Node
 }
 
 function group(children: Node[], over: Over<GroupNode>): Node {
   return {
+    ...over,
     id: over.id ?? uid('n'),
     type: 'group',
     children,
     transform: withTransform(over.transform),
-    ...over,
   } as Node
 }
 
 function axes(over: Over<AxesNode>): Node {
   return {
+    ...over,
     id: over.id ?? uid('n'),
     type: 'axes',
     children: [],
     transform: withTransform(over.transform),
-    ...over,
   } as Node
 }
 
@@ -160,7 +162,7 @@ export const velocityArrow: Template = {
     group(
       [
         line({
-          transform: {x: 0, y: 0, rotation: 'atan2(vy, vx)' },
+          transform: {x: 0, y: 0, rotation: 'deg(atan2(vy, vx))' },
           length: { expr: 'lengthScale * hypot(vx, vy)' },
           style: { stroke: '#0ea5e9', strokeWidth: 3 },
           arrowHead: { end: true, size: 9 },
@@ -209,7 +211,7 @@ export const positionVector: Template = {
   params: { px: inputParam('مختصات افقی'), py: inputParam('مختصات عمودی') },
   nodes: [
     line({
-      transform: {x: 0, y: 0, rotation: 'atan2(py, px)' },
+      transform: {x: 0, y: 0, rotation: 'deg(atan2(py, px))' },
       length: { expr: 'hypot(px, py)' },
       style: { stroke: '#7c3aed', strokeWidth: 2.5, dash: 8 },
       arrowHead: { end: true, size: 8 },
@@ -230,13 +232,13 @@ export const accelDecomposition: Template = {
   },
   nodes: [
     line({
-      transform: {x: 0, y: 0, rotation: 'atan2(aT_y, aT_x)' },
+      transform: {x: 0, y: 0, rotation: 'deg(atan2(aT_y, aT_x))' },
       length: { expr: 'hypot(aT_x, aT_y)' },
       style: { stroke: '#dc2626', strokeWidth: 2.5 },
       arrowHead: { end: true, size: 8 },
     }),
     line({
-      transform: {x: 'aT_x', y: 'aT_y', rotation: 'atan2(aN_y, aN_x)' },
+      transform: {x: 'aT_x', y: 'aT_y', rotation: 'deg(atan2(aN_y, aN_x))' },
       length: { expr: 'hypot(aN_x, aN_y)' },
       style: { stroke: '#f59e0b', strokeWidth: 2.5 },
       arrowHead: { end: true, size: 8 },
@@ -252,7 +254,7 @@ export const tangentLine: Template = {
   params: { m: inputParam('شیب مماس') },
   nodes: [
     line({
-      transform: {x: 0, y: 0, rotation: 'atan2(m, 1)' },
+      transform: {x: 0, y: 0, rotation: 'deg(atan2(m, 1))' },
       length: 120,
       style: { stroke: '#16a34a', strokeWidth: 2 },
     }),
@@ -267,7 +269,7 @@ export const secantLine: Template = {
   params: { dx: inputParam('Δx'), dy: inputParam('Δy') },
   nodes: [
     line({
-      transform: {x: 0, y: 0, rotation: 'atan2(dy, dx)' },
+      transform: {x: 0, y: 0, rotation: 'deg(atan2(dy, dx))' },
       length: { expr: 'hypot(dx, dy)' },
       style: { stroke: '#e11d48', strokeWidth: 2.5 },
     }),
@@ -302,7 +304,7 @@ export const motionTrail: Template = {
   },
   nodes: [
     line({
-      transform: { x: 0, y: 0, rotation: 'atan2(vy, vx)' },
+      transform: { x: 0, y: 0, rotation: 'deg(atan2(vy, vx))' },
       length: { expr: 'hypot(vx, vy) * trailTime' },
       style: { stroke: '#64748b', strokeWidth: 2, dash: 6 },
     }),
@@ -411,23 +413,23 @@ export const freeBodyDiagram: Template = {
     }),
     // weight, always straight down
     line({
-      transform: { x: 0, y: 0, rotation: 90 },
+      transform: { x: 0, y: 0, rotation: -90 },
       length: { expr: 'mass * g * 0.06' },
       style: { stroke: '#b91c1c', strokeWidth: 3 },
       arrowHead: { end: true, size: 9 },
       name: 'وزن',
     }),
-    // normal, perpendicular to the plane
+    // normal, perpendicular to the plane: a rotation of 90° is straight up
     line({
-      transform: { x: 0, y: 0, rotation: 'theta * pi / 180 - 90' },
-      length: { expr: 'mass * g * cos(theta * pi / 180) * 0.06' },
+      transform: { x: 0, y: 0, rotation: 'theta + 90' },
+      length: { expr: 'mass * g * cos(deg(theta)) * 0.06' },
       style: { stroke: '#15803d', strokeWidth: 3 },
       arrowHead: { end: true, size: 9 },
       name: 'نرمال',
     }),
     // friction, along the plane
     line({
-      transform: { x: 0, y: 0, rotation: 'theta * pi / 180 + (friction < 0 ? 180 : 0)' },
+      transform: { x: 0, y: 0, rotation: 'theta + if(friction < 0, 180, 0)' },
       length: { expr: 'abs(friction) * 0.06' },
       style: { stroke: '#7c3aed', strokeWidth: 3 },
       arrowHead: { end: true, size: 9 },

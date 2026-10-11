@@ -12,7 +12,7 @@
  * thing that crashes a lesson five minutes into a class.
  */
 
-import type { Animation, AnimLayer, AnimPanel, AnimSeries } from '../types'
+import type { AnimLayer, AnimPanel, AnimScene, AnimSeries, Animation } from '../types'
 import {
   type Animation2,
   type Node,
@@ -27,6 +27,7 @@ import {
   uid,
 } from '../types/anim2'
 import { BUILTIN_TEMPLATES, templateLibrary } from '../lib/anim2/templates'
+import { FUNCTIONS, tokenize, validateExpr } from '../lib/anim2/expr'
 
 const T0 = (): Transform => emptyTransform()
 
@@ -54,6 +55,49 @@ export function rewriteRefs(source: string, map: Map<string, string>): string {
     const to = map.get(name)
     return to ? `@${to}` : whole
   })
+}
+
+/**
+ * A v1 series expression is a function of *time*, because v1's x axis was
+ * always time. A v2 plot expression is a function of the axis variable, which
+ * is `x` inside a plot. Copying the source across unchanged therefore draws a
+ * constant — the curve would be the value at the playhead, repeated across
+ * the whole graph.
+ *
+ * The rewrite goes through the tokeniser rather than a regex, so a variable
+ * called `dt`, or the `t` inside `atan2(t)`, is left alone.
+ */
+export function timeExprToX(source: string): string {
+  if (!source) return source
+  let out = ''
+  let cursor = 0
+  let touched = false
+  try {
+    for (const tok of tokenize(source)) {
+      if (tok.kind === 'eof') break
+      if (tok.kind === 'ident' && (tok.text === 't' || tok.text === 'time')) {
+        out += source.slice(cursor, tok.pos - 1) + 'x'
+        cursor = tok.pos - 1 + tok.text.length
+        touched = true
+      }
+    }
+    if (!touched) return source
+  } catch {
+    return source
+  }
+  const rewritten = out + source.slice(cursor)
+  // Only rewrite something that actually parsed. A formula that was already
+  // broken stays as written, so the engine reports the real problem instead of
+  // a mangled version of it. The scope is built from the identifiers present,
+  // because a v1 series may reference parameters this module never sees.
+  const vars = new Set(['x', 'u', 't', 'lt', 'duration'])
+  for (const tok of tokenize(rewritten)) {
+    if (tok.kind === 'ident' && !(tok.text in FUNCTIONS) && tok.text !== 'pi' && tok.text !== 'e' && tok.text !== 'tau') {
+      vars.add(tok.text)
+    }
+  }
+  const check = validateExpr(rewritten, { vars, refIds: new Set() })
+  return check.ok ? rewritten : source
 }
 
 function num(v: unknown, fallback = 0): number {
@@ -289,9 +333,14 @@ function vectorChildren(layer: AnimLayer, transform: Transform): Node[] {
  * each decoration becomes a separate node with its own time window, so
  * nothing overlaps that did not overlap before.
  */
-function migrateSeries(series: AnimSeries, index: number, rename: (id: string) => string): Node[] {
+function migrateSeries(
+  series: AnimSeries,
+  index: number,
+  rename: (id: string) => string,
+  domain: [number, number],
+): Node[] {
   const id = rename(series.id || uid('plot'))
-  const expr = str(series.expr, '0')
+  const expr = timeExprToX(str(series.expr, '0'))
   const out: Node[] = []
 
   out.push({
@@ -300,7 +349,9 @@ function migrateSeries(series: AnimSeries, index: number, rename: (id: string) =
     name: str(series.label, `y${index + 1}`),
     transform: T0(),
     expr,
-    domain: [0, 1],
+    // The curve spans the scene's x domain. Leaving it at [0, 1] drew only
+    // the leftmost sliver of the graph.
+    domain,
     samples: 200,
     draw: series.style === 'dashed' ? 'dashed' : series.style === 'dots' ? 'dots' : series.style === 'fill' ? 'fill' : 'line',
     style: {
@@ -352,7 +403,43 @@ function migrateSeries(series: AnimSeries, index: number, rename: (id: string) =
  *  Panels → axes nodes
  * ------------------------------------------------------------------ */
 
-function migratePanels(panels: AnimPanel[] | undefined, nodeCount: number): Node[] {
+/**
+ * v1 drew everything into a graph box with a domain — `scene.xMin..xMax`.
+ * v2 free scenes are in scene units (1000 × ~620), so a body at (2, 4)
+ * lands in the top-left corner unless the domain becomes an explicit frame.
+ *
+ * That frame is an `axes` node, and every curve and body goes inside it.
+ */
+function sceneAxes(scene: Partial<AnimScene> | undefined, nodeId: string): Node {
+  const xMin = num(scene?.xMin, 0)
+  const xMax = num(scene?.xMax, 10)
+  const yMin = num(scene?.yMin, 0)
+  const yMax = num(scene?.yMax, 10)
+  const pad = (xMax - xMin) * 0.06 || 1
+  return {
+    id: nodeId,
+    type: 'axes',
+    name: 'محور صحنه',
+    transform: T0(),
+    axes: {
+      xDomain: [xMin - pad, xMax + pad],
+      yDomain: [yMin - pad * ((yMax - yMin) / Math.max(1e-6, xMax - xMin) || 1), yMax + pad * ((yMax - yMin) / Math.max(1e-6, xMax - xMin) || 1)],
+      // Inset, because tick labels and axis titles are drawn outside the box.
+      rect: [0.07, 0.06, 0.9, 0.8],
+      ticks: { x: Math.round((xMax - xMin) / 2) || 4, y: Math.round((yMax - yMin) / 4) || 4 },
+      labels: {
+        x: str(scene?.xLabel, ''),
+        y: str(scene?.yLabel, ''),
+      },
+      grid: scene?.showGrid !== false,
+      arrows: { x: true, y: true },
+    },
+    children: [],
+  } as Node
+}
+
+/** Stacked panels: one axes node each, all sharing the same clock. */
+function migratePanels(panels: AnimPanel[] | undefined): Node[] {
   if (!panels?.length) return []
   return panels.map((panel, i) => ({
     id: panel.id || uid('axes'),
@@ -360,13 +447,13 @@ function migratePanels(panels: AnimPanel[] | undefined, nodeCount: number): Node
     name: str(panel.title, `نمودار ${i + 1}`),
     transform: T0(),
     axes: {
-      xDomain: [0, 1],
-      yDomain: [num(panel.yMin, 0), num(panel.yMax, 1)],
+      xDomain: [0, 1] as [number, number],
+      yDomain: [num(panel.yMin, 0), num(panel.yMax, 1)] as [number, number],
       rect: [0, i / panels.length, 1, 1 / panels.length] as [number, number, number, number],
       ticks: { x: 5, y: 5 },
       grid: true,
     },
-    children: nodeCount > 0 ? [] : [],
+    children: [],
   })) as Node[]
 }
 
@@ -440,17 +527,33 @@ export function migrateAnimationV1toV2(input: unknown): MigrationReport {
   const scene = v1.scene
   const defaultSize = scene ? Math.max(1, Math.abs(num(scene.xMax, 10) - num(scene.xMin, 0)) / 40) : 1
 
-  for (const panel of migratePanels((v1 as { panels?: AnimPanel[] }).panels, layers.length + series.length)) {
-    nodes.push(panel)
+  const panels = migratePanels((v1 as { panels?: AnimPanel[] }).panels)
+  for (const panel of panels) nodes.push(panel)
+
+  // Everything that used to be drawn inside the graph box now lives inside an
+  // axes node carrying that box's domain.
+  const frame = panels.length ? null : sceneAxes(scene, 'scene-frame')
+  const xDomain = frame
+    ? ((frame as { axes: { xDomain: [number, number] } }).axes.xDomain ?? [0, 1] as [number, number])
+    : ([0, 1] as [number, number])
+  const inside: Node[] = []
+  for (const s of series) {
+    inside.push(...migrateSeries(s, series.indexOf(s), rename, [xDomain[0], xDomain[1]]))
   }
-  for (const s of series) nodes.push(...migrateSeries(s, series.indexOf(s), rename))
   for (const layer of layers) {
     if (!layer) continue
     try {
-      nodes.push(migrateLayer(layer, seriesById, defaultSize, rename))
+      inside.push(migrateLayer(layer, seriesById, defaultSize, rename))
     } catch (e) {
       warnings.push(`لایهٔ «${str(layer.name, '؟')}» منتقل نشد: ${e instanceof Error ? e.message : String(e)}`)
     }
+  }
+
+  if (frame) {
+    Object.assign(frame, { children: inside })
+    nodes.push(frame)
+  } else {
+    nodes.push(...inside)
   }
 
   const anim: Animation2 = {
