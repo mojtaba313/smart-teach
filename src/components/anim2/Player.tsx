@@ -19,6 +19,7 @@
 import {
   Component,
   memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -31,7 +32,10 @@ import type { Animation2 } from '../../types/anim2'
 import { ANIM2_SCHEMA, LIMITS } from '../../types/anim2'
 import { compileAnimation, evaluate, type CompiledAnimation, type Frame as EngineFrame } from '../../lib/anim2/engine'
 import { Clock, prefersReducedMotion } from '../../lib/anim2/clock'
-import { clearGeometryCache, renderNodes } from './nodes'
+import { ParticleSystem } from '../../lib/anim2/particles'
+import { clearGeometryCache, ParticleLayer, renderNodes } from './nodes'
+import { ParamsPanel } from './Controls'
+import { useSceneRuntime } from './useSceneRuntime'
 import { freeFrame, viewFor } from './geometry'
 import { cn, toFaDigits } from '../../lib/utils'
 
@@ -82,16 +86,26 @@ const Canvas = memo(function Canvas({
   compiled,
   clock,
   onScrub,
+  particles,
+  particleVersion,
+  mapFrame,
   className,
+  overrides,
 }: {
   compiled: CompiledAnimation
   clock: Clock
   onScrub?: (t: number) => void
+  particles?: ParticleSystem
+  particleVersion?: number
+  /** Data units to scene units; particles simulate in the scene's own space. */
+  mapFrame?: (x: number, y: number) => { x: number; y: number }
   className?: string
+  /** Live control readings, so the scene responds to the knobs. */
+  overrides?: Record<string, number>
 }) {
   // The only place in the tree that follows the clock frame by frame.
   const t = useSyncExternalStore(clock.subscribe, clock.getSnapshot)
-  const frame = useMemo(() => evaluate(compiled, t), [compiled, t])
+  const frame = useMemo(() => evaluate(compiled, t, overrides), [compiled, t, overrides])
 
   const view = useMemo(
     () => viewFor(compiled.anim.scene?.aspect, compiled.anim.scene?.height),
@@ -146,9 +160,12 @@ const Canvas = memo(function Canvas({
           free,
           hash: compiled.hash,
           t,
-          params: {},
+          params: overrides ?? {},
           textScale,
         })}
+        {particles ? (
+          <ParticleLayer particles={particles} version={particleVersion} map={mapFrame} />
+        ) : null}
       </svg>
     </div>
   )
@@ -237,6 +254,18 @@ export function AnimationPlayer({
   onScrub,
   className,
 }: AnimationPlayerProps) {
+  /**
+   * Control readings are local state, not a document edit. A viewer's slider
+   * drag must not mark the deck dirty, and must not survive into the next
+   * scene — so they start from the declared defaults every mount.
+   */
+  const [live, setLive] = useState<Record<string, number>>({})
+  const overrides = useMemo(() => {
+    if (Object.keys(live).length === 0) return undefined
+    const out: Record<string, number> = {}
+    for (const [k, v] of Object.entries(live)) out[k] = v
+    return out
+  }, [live])
   const duration = Math.min(LIMITS.maxDuration, Math.max(LIMITS.minDuration, anim.duration || 6))
   const reduced = useMemo(() => prefersReducedMotion(), [])
 
@@ -253,7 +282,13 @@ export function AnimationPlayer({
   // The clock is state, not a ref: reading a ref during render is what made
   // v1 re-render the studio sixty times a second, and React is right to
   // complain about it.
-  const [clock] = useState(() => new Clock({ duration }))
+  const [clock] = useState(() => new Clock({ duration, startAt: anim.playback?.startAt }))
+  /**
+   * Particles live outside React. Spawning 200 of them must not re-render the
+   * scene tree, so the system holds the state and bumps a version counter.
+   */
+  const runtime = useSceneRuntime(clock, compiled, overrides)
+  const particles = runtime.particles
 
   const [error, setError] = useState<Error | null>(null)
 
@@ -261,13 +296,26 @@ export function AnimationPlayer({
     clock.reconfigure({
       duration,
       loop: anim.loop === true,
-      speed: anim.speed ?? 1,
+      speed: (anim.speed ?? 1) * (anim.playback?.rate ?? 1),
+      segments: (anim.playback?.segments ?? []).map((s) => ({ from: s.from ?? 0, to: s.to ?? duration })),
+      pingPong: anim.playback?.pingPong === true,
+      startAt: anim.playback?.startAt,
+      stopAt: anim.playback?.stopAt,
       pauses: (anim.cues ?? []).filter((c) => c.pause).map((c) => c.t),
       honourPauses: presenter,
     })
-  }, [clock, duration, presenter, anim.loop, anim.speed, anim.cues])
+  }, [clock, duration, presenter, anim.loop, anim.speed, anim.playback, anim.cues])
 
   useEffect(() => () => clock.dispose(), [clock])
+
+  // The runtime owns seeking so edge state and particles reset together.
+  const seek = useCallback(
+    (time: number) => {
+      runtime.seek(time)
+      onScrub?.(time)
+    },
+    [runtime, onScrub],
+  )
 
   // Off screen, stop. A lesson deck can hold a dozen animations and running
   // all of them is pure heat.
@@ -305,14 +353,26 @@ export function AnimationPlayer({
         <Canvas
           compiled={compiled}
           clock={clock}
-          onScrub={(t) => {
-            clock.seek(t)
-            onScrub?.(t)
-          }}
+          onScrub={seek}
+          particles={particles}
+          particleVersion={runtime.version}
+          overrides={overrides}
         />
       </AnimationErrorBoundary>
 
-      {showTransport ? <Transport clock={clock} duration={duration} reduced={reduced} /> : null}
+      {showTransport ? (
+        <>
+          <ParamsPanel
+            params={compiled.params}
+            disabled={reduced || compiled.warnings.length > 0}
+            onChange={(name, value) =>
+              setLive((prev) => ({ ...prev, [name]: value }))
+            }
+            onAction={(_name, actions) => runtime.run(actions)}
+          />
+          <Transport clock={clock} duration={duration} reduced={reduced} />
+        </>
+      ) : null}
 
       {compiled.warnings.length > 0 ? (
         <ul className="space-y-0.5 text-2xs text-warn">

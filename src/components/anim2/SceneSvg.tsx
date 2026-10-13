@@ -13,6 +13,7 @@
 import {
   forwardRef,
   memo,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -21,12 +22,32 @@ import {
   type SVGProps,
 } from 'react'
 import type { Animation2 } from '../../types/anim2'
-import type { CompiledAnimation, Frame as EngineFrame } from '../../lib/anim2/engine'
-import { freeFrame, viewFor, type View } from './geometry'
+import {
+  resolveDrawingLayer,
+  valueOf,
+  type CompiledAnimation,
+  type Frame as EngineFrame,
+} from '../../lib/anim2/engine'
+import { drawingText } from '../../lib/anim2/drawings'
+import type { EvalEnv } from '../../lib/anim2/expr'
+import { fracBox, freeFrame, makeFrame, viewFor, type Frame, type View } from './geometry'
+import { DrawingLayer } from './drawings'
 import { renderNodes } from './nodes'
 import { cn } from '../../lib/utils'
 
 /** A sentence a screen reader can actually read. */
+/** The environment drawing expressions evaluate in. */
+function drawingEnv(compiled: CompiledAnimation, t: number): EvalEnv {
+  return {
+    t,
+    lt: t,
+    x: t,
+    u: compiled.duration === 0 ? 0 : t / compiled.duration,
+    duration: compiled.duration,
+    v: valueOf(compiled, t),
+  }
+}
+
 export function describeScene(anim: Animation2, frame: EngineFrame): string {
   const parts: string[] = []
   if (anim.title) parts.push(anim.title)
@@ -45,7 +66,7 @@ export type SceneSvgProps = {
   overlay?: ReactNode
   className?: string
   svgProps?: SVGProps<SVGSVGElement>
-  onReady?: (info: { view: View; textScale: number; free: ReturnType<typeof freeFrame> }) => void
+  onReady?: (info: { view: View; textScale: number; free: Frame; scene: Frame }) => void
 }
 
 /**
@@ -76,9 +97,30 @@ export const SceneSvg = memo(
     }, [view.width])
 
     const free = useMemo(() => freeFrame(view), [view])
+  const drawingLayer = useMemo(() => resolveDrawingLayer(compiled, t), [compiled, t])
+  const resolveDrawingText = useCallback(
+    (v: Parameters<typeof drawingText>[0]): string => drawingText(v, drawingEnv(compiled, t), { vars: compiled.scope, refIds: compiled.refIds }),
+    [compiled, t],
+  )
+  /**
+   * The frame a bare `(x, y)` pair belongs to. Event particles spawn in the
+   * scene's own units, so they have to go through the axes when the scene has
+   * one — mapping them with the free frame parked them on the origin pixel.
+   */
+  const scene = useMemo((): Frame => {
+    // `type` lives on the *resolved* node, not the compiled one; asking the
+    // compiled tree silently finds nothing and everything falls back to the
+    // free frame, which parks a value of 2 at the top-left pixel.
+    const axes = frame.nodes.find((n) => n.type === 'axes')?.raw as
+      | { axes?: { xDomain: [number, number]; yDomain: [number, number]; rect?: [number, number, number, number] } }
+      | undefined
+    if (!axes?.axes) return free
+    const r = axes.axes.rect ?? [0, 0, 1, 1]
+    return makeFrame(fracBox(r, view), axes.axes.xDomain, axes.axes.yDomain)
+  }, [frame, free, view])
     useEffect(() => {
-      onReady?.({ view, textScale, free })
-    }, [onReady, view, textScale, free])
+      onReady?.({ view, textScale, free, scene })
+    }, [onReady, view, textScale, free, scene])
 
     const background = (compiled.anim.scene?.background as string | undefined) ?? 'rgb(var(--scene))'
 
@@ -94,6 +136,11 @@ export const SceneSvg = memo(
         >
           <title>{compiled.anim.title || 'انیمیشن'}</title>
           <desc>{describeScene(compiled.anim, frame)}</desc>
+          <DrawingLayer
+            drawings={drawingLayer.resolved}
+            frame={scene}
+            resolveText={resolveDrawingText}
+          />
           {renderNodes(frame.nodes, {
             frame: free,
             free,

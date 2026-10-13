@@ -42,6 +42,13 @@ export type Frame = {
   /** Inverse maps, for hit-testing in the studio. */
   ix(px: number): number
   iy(py: number): number
+  /**
+   * A length in data units expressed in scene units. Annotation that has size
+   * rather than position — a stroke width, an arrow head, a protractor radius
+   * — has to go through this, or it stays the same size on screen while the
+   * axes zoom underneath it.
+   */
+  scale(v: number): number
 }
 
 export function makeFrame(
@@ -61,6 +68,7 @@ export function makeFrame(
     sy,
     ix: (px: number) => xDomain[0] + (box.w === 0 ? 0 : ((px - box.x) / box.w) * dx),
     iy: (py: number) => yDomain[0] + (box.y + box.h === py ? 0 : ((box.y + box.h - py) / box.h) * dy),
+    scale: (v: number) => (dx === 0 ? v : (v * box.w) / dx),
   }
 }
 

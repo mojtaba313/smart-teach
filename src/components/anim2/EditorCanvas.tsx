@@ -19,16 +19,18 @@
 
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Node as NodeT, NumProp } from '../../types/anim2'
 import { uid } from '../../types/anim2'
 import type { Clock } from '../../lib/anim2/clock'
 import { compileAnimation, evaluate, type CompiledAnimation, type ResolvedNode } from '../../lib/anim2/engine'
-import type { Animation2 } from '../../types/anim2'
+import type { AnimAction, Animation2 } from '../../types/anim2'
 import { modeOf, propsFor, readPath, writePath } from '../../lib/anim2/schema'
 import { insertKey } from '../../lib/anim2/timeline'
 import type { Frame, View } from './geometry'
 import { SceneSvg } from './SceneSvg'
+import { ParticleLayer } from './nodes'
+import { useSceneRuntime } from './useSceneRuntime'
 import { toFaDigits } from '../../lib/utils'
 
 const HANDLE = 9
@@ -55,6 +57,10 @@ function childFrameOf(node: ResolvedNode, parent: Frame): Frame {
     sy: makeSy(box, axes.yDomain),
     ix: makeIx(box, axes.xDomain),
     iy: makeIy(box, axes.yDomain),
+    scale: (v: number) => {
+      const dx = axes.xDomain[1] - axes.xDomain[0]
+      return dx === 0 ? v : (v * box.w) / dx
+    },
   }
 }
 
@@ -93,6 +99,8 @@ export type CanvasEdit = {
 export function EditorCanvas({
   anim,
   clock,
+  svgRef,
+  runtimeRef,
   selected,
   record,
   onSelect,
@@ -103,10 +111,15 @@ export function EditorCanvas({
 }: {
   anim: Animation2
   clock: Clock
+  /** Points at the live `<svg>`, for the studio's export path. */
+  svgRef?: React.RefObject<SVGSVGElement | null>
+  /** Exposes the scene runtime so a control's actions can reach the clock. */
+  runtimeRef?: React.RefObject<{ run: (actions: readonly AnimAction[]) => void } | null>
   selected: string | null
   /** When on, dragging writes keyframes at the playhead instead of constants. */
   record: boolean
-  onSelect: (id: string | null) => void
+  /** `additive` is set by a shift- or ctrl-click on empty canvas. */
+  onSelect: (id: string | null, additive?: boolean) => void
   onBegin: () => void
   onPreview: (edit: CanvasEdit) => void
   onCommit: (edit: CanvasEdit) => void
@@ -115,11 +128,23 @@ export function EditorCanvas({
   const compiled: CompiledAnimation = useMemo(() => compileAnimation(anim), [anim])
   const t = clock.t
   const frame = useMemo(() => evaluate(compiled, t), [compiled, t])
-  const [geo, setGeo] = useState<{ view: View; free: Frame } | null>(null)
+  const [geo, setGeo] = useState<{ view: View; free: Frame; scene: Frame } | null>(null)
   const stageRef = useRef<SVGSVGElement | null>(null)
+  // Keep the caller's ref pointing at the same element without forwarding a
+  // ref through SceneSvg, which has its own ref for measurement.
+  useEffect(() => {
+    if (svgRef) svgRef.current = stageRef.current
+  }, [svgRef, geo])
+  // The studio edits through this canvas, not through AnimationPlayer, so it
+  // needs its own event loop or a scene stops firing while you are editing it.
+  const runtime = useSceneRuntime(clock, compiled)
+  useEffect(() => {
+    if (runtimeRef) runtimeRef.current = runtime
+  }, [runtimeRef, runtime])
 
   const handleReady = useCallback(
-    (info: { view: View; textScale: number; free: Frame }) => setGeo({ view: info.view, free: info.free }),
+    (info: { view: View; textScale: number; free: Frame; scene: Frame }) =>
+      setGeo({ view: info.view, free: info.free, scene: info.scene }),
     [],
   )
 
@@ -284,13 +309,16 @@ export function EditorCanvas({
   }
 
   const scrub = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!onScrub || !geo) return
+    if (!geo) return
     const rect = e.currentTarget.getBoundingClientRect()
     const ratio = (e.clientX - rect.left) / Math.max(1, rect.width)
-    onScrub(Math.min(1, Math.max(0, ratio)) * compiled.duration)
+    const time = Math.min(1, Math.max(0, ratio)) * compiled.duration
+    // Seeking through the runtime resets event edges and particles.
+    runtime.seek(time)
+    onScrub?.(time)
   }
 
-  const overlay = node && f && geo ? (
+  const selection = node && f && geo ? (
     <SelectionChrome
       node={node}
       frame={f}
@@ -298,6 +326,18 @@ export function EditorCanvas({
       unit={Math.max(1, Math.min(geo.view.width, geo.view.height) / 120)}
     />
   ) : null
+
+  // Sparks sit under the selection chrome so the handles stay grabbable.
+  const overlay = (
+    <>
+      <ParticleLayer
+        particles={runtime.particles}
+        version={runtime.version}
+        map={geo ? (x, y) => ({ x: geo.scene.sx(x), y: geo.scene.sy(y) }) : undefined}
+      />
+      {selection}
+    </>
+  )
 
   return (
     <SceneSvg
@@ -312,7 +352,7 @@ export function EditorCanvas({
         onPointerDown: (e: React.PointerEvent<SVGSVGElement>) => {
           // A handle owns its own gesture; the body never steals it.
           if ((e.target as Element).closest('[data-handle]')) return
-          onSelect(hitTest(e.clientX, e.clientY)?.id ?? null)
+          onSelect(hitTest(e.clientX, e.clientY)?.id ?? null, e.shiftKey || e.metaKey || e.ctrlKey)
           scrub(e)
         },
       }}

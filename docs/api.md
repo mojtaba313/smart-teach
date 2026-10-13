@@ -316,282 +316,203 @@ type StepBase = { id: string; span: BlockSpan }   // BlockSpan = 'full' | 'half'
 
 ---
 
-## ۷. `Animation`
+## ۷. `Animation2` — سند انیمیشن
+
+نسخهٔ ۲. تشخیص با `schema: 2`. یک سند v1 همیشه هنگام بارگذاری ارتقا می‌یابد
+(`migrateAnimationV1toV2`)، پس می‌توانید بدون شرط فراخوانی‌اش کنید.
 
 ```ts
-type Animation = {
+type Animation2 = {
+  schema: 2
   title: string
-  duration: number      // ثانیه
-  loop: boolean
-  autoplay: boolean
-  speed: number         // ضریب سرعت پخش
-  scene: AnimScene
-  layers: AnimLayer[]
-  series: AnimSeries[]
-  readout: boolean      // جعبهٔ زندهٔ x/v/a
-}
-```
-
-| میدان | پیش‌فرض | اثر |
-| --- | --- | --- |
-| `title` | `'حرکت‌شناسی'` | بالای صحنه و برچسب کادر در ویرایشگر |
-| `duration` | `6` | طول محور زمان در حالت `time` |
-| `loop` | `true` | پخش بی‌نهایت؛ `false` یعنی روی `duration` می‌ایستد |
-| `autoplay` | `true` | در اجرا بدون کلیک شروع می‌شود |
-| `speed` | `1` | مثلاً `0.5` = نیم‌سرعت |
-| `readout` | `true` | جدول `x, y, vx, vy, |v|, ax` روی صحنه |
-
-قواعد عملی:
-
-* `duration` باید ≥ بیشترین `t` در کی‌فریم‌ها و ≥ `duration` انتظارشدهٔ
-  فرمول‌ها باشد، وگرنه استودیو هشدار «بخشی از حرکت دیده نمی‌شود» می‌دهد.
-* در استودیو `Space` پخش/مکث، کشیدن روی صحنه = جابه‌جایی دستی زمان،
-  `←`/`→` گام‌به‌گام با `Shift` برای ۰٫۵ ثانیه، `Home`/`End` ابتدا/انتها.
-* `follow` فقط در `plotSpace: 'time'` معنی‌دار است.
-
----
-
-## ۸. `AnimScene`
-
-```ts
-type AnimScene = {
-  plotSpace: 'time' | 'free'
-  xMin: number; xMax: number
-  yMin: number; yMax: number
-  aspect: number
-  showAxes: boolean
-  showGrid: boolean
-  xLabel: string
-  yLabel: string
-  xTicks: number   // تعداد هدف، نه مقدار
-  yTicks: number
-  /** نمودارهای روی هم؛ نبودنشان = یک نمودار (همان رفتار قدیم) */
-  panels?: AnimPanel[]
-  /** فاصلهٔ عمودی نمودارها، بر حسب واحد view-box */
-  panelGap?: number
+  duration: number          // ثانیه، بازهٔ مجاز 0.2 تا 600
+  loop?: boolean
+  autoplay?: boolean
+  speed?: number
+  /** مقادیر زنده؛ با نامشان در هر فرمولی در دسترس‌اند */
+  params: Record<string, Param>
+  cues: Cue[]
+  /** گره‌های سطح بالا، در واحدهای بوم صحنه */
+  nodes: Node[]
+  templates?: Record<string, Template>
+  readout?: boolean
+  scene?: Scene2
 }
 
-type AnimPanel = {
-  id: string
-  /** عنوان گوشهٔ بالا-چپ همان نمودار، مثلاً `x (m)` */
-  title?: string
-  yMin: number
-  yMax: number
-  yLabel?: string
-  yTicks?: number
+type Param = {
+  value: number
+  min?: number
+  max?: number
+  step?: number
+  label?: string
+  /** در حالت نمایش، لغزندهٔ زنده نشان داده می‌شود */
+  slider?: boolean
 }
-```
 
-مقادیر پیش‌فرض `emptyAnimation()`:
-
-```json
-{ "plotSpace": "time", "xMin": 0, "xMax": 6, "yMin": 0, "yMax": 30,
-  "aspect": 0.62, "showAxes": true, "showGrid": true,
-  "xLabel": "t (s)", "yLabel": "x (m)", "xTicks": 6, "yTicks": 6 }
-```
-
-| میدان | معنی دقیق |
-| --- | --- |
-| `plotSpace` | `time`: محور افقی = زمان، از ۰ تا `duration`. `free`: محور افقی = مختصات جهان. |
-| `xMin`/`xMax` | در `time` **نادیده گرفته می‌شود**. در `free` بازهٔ افقی صحنه. |
-| `yMin`/`yMax` | بازهٔ عمودی. اگر ۰ داخلش نباشد، محور افقی به پایین کادر می‌چسبد. |
-| `aspect` | نسبت ارتفاع/عرض. `0.62` نمودار متعارف، `0.42` جاده/صحنهٔ کم‌ارتفاع، `0.3` خیلی پهن. |
-| `xTicks`/`yTicks` | **تعداد هدف** تیک‌ها، نه مقدارشان. `ticksFor` گام را به یک عدد «گرد» می‌کند، پس تعداد واقعی می‌تواند کمی با عدد شما فرق کند. |
-| `xLabel`/`yLabel` | رشتهٔ کوتاه. اگر `xLabel` خالی باشد اصلاً رسم نمی‌شود. |
-
-**نمودارهای روی هم (`panels`).** برای x(t)، v(t) و a(t) کنار هم، به‌جای سه
-صحنهٔ جدا، یک صحنه با چند پنل بسازید: همهٔ پنل‌ها **یک ساعت** دارند، پس
-عمودی مقایسه‌شونده است. `scene.yMin`/`yMax`/`yLabel`/`yTicks` در این حالت
-نادیده گرفته می‌شوند و هر پنل دامنهٔ خودش را دارد:
-
-```json
-{ "plotSpace": "time", "aspect": 0.86, "panelGap": 10,
-  "panels": [
-    { "id": "p1", "title": "جاده",     "yMin": -1, "yMax": 1,  "yTicks": 2 },
-    { "id": "p2", "title": "x (m)",    "yMin": -4, "yMax": 32, "yTicks": 4 },
-    { "id": "p3", "title": "v (m/s)",  "yMin": -1, "yMax": 18, "yTicks": 4 },
-    { "id": "p4", "title": "a (m/s²)", "yMin": -1, "yMax": 6,  "yTicks": 4 }
-  ] }
-```
-
-هر `series` و هر `layer` با `panel` روی یکی از این‌ها می‌نشیند؛
-`layer.panel: "*"` یعنی در **همهٔ** پنل‌ها (برای نقطه‌ای که روی نمودار
-می‌سُرد). پنل اول پیش‌فرض است.
-
-**قانون قاب‌بندی.** تابع هر فرمول را روی `[0, duration]` حساب کنید، کمینه و
-بیشینه را بردارید و حدود ۱۰٪ بیرون‌تر را به‌عنوان `yMin`/`yMax` بگذارید:
-
-| فرمول | duration | بیشینه | `yMin`, `yMax` پیشنهادی |
-| --- | --- | --- | --- |
-| `2*t` | 6 | 12 | `-1`, `14` |
-| `t*t + 3*t - 5` | 5 | 25 | `-3`, `30` |
-| `v0*t - 0.5*9.8*t*t` | 4 | 16 (اوج) | `-2`, `18` |
-| `-t*t + 6*t` | 5 | 9 | `-1`, `12` |
-
-اگر `yMin ≤ 0 ≤ yMax` باشد، محور افقی دقیقاً روی `y = 0` می‌افتد؛ اگر ۰
-خارج بازه باشد، محور به لبهٔ کادر می‌چسبد. اولی برای نمودارهای فیزیک
-درست‌تر است.
-
----
-
-## ۹. `AnimSeries`
-
-```ts
-type AnimSeries = {
-  id: string
+type Cue = {
+  t: number
   label: string
-  expr: string        // فرمول بر حسب t، بدون «=»
-  color: string       // #rrggbb
-  style: 'line' | 'dashed' | 'dots' | 'fill'
-  visible: boolean
-  reveal: boolean
-  tangent?: boolean
-  secant?: boolean
+  /** در حالت ارائه، پخش اینجا متوقف می‌شود و Space ادامه می‌دهد */
+  pause?: boolean
+}
+
+type Scene2 = {
+  width?: number
+  height?: number
+  aspect?: number            // اگر height نباشد از این ساخته می‌شود
+  background?: string
+  free?: boolean
 }
 ```
 
-```json
-{ "id": "s-x", "label": "x = 3t", "expr": "3*t", "color": "#7c3aed",
-  "style": "line", "visible": true, "reveal": true,
-  "tangent": true, "secant": false }
-```
+## ۸. `Node` — تنها چیزی که رسم می‌شود
 
-| میدان | معنی رندر |
-| --- | --- |
-| `id` | کلید ارجاع برای `AnimLayer.follow` |
-| `label` | راهنمای بالای صحنه و برچسب قاطع `v̄` |
-| `expr` | فقط زبان بند ۱۳؛ خراب ⇒ بی‌صدا حذف از مسیر |
-| `style: line` | خط ممتد |
-| `style: dashed` | خط‌چین — برای منحنی مرجع |
-| `style: dots` | ۲۵ نقطهٔ نمونه |
-| `style: fill` | ناحیهٔ پرشده زیر منحنی (۱۵٪ شفافیت) — برای «مساحت زیر نمودار» |
-| `reveal` | `true`: منحنی فقط تا لحظهٔ جاری کشیده می‌شود + نقطهٔ سر و خط عمودی راهنما. `false`: کل منحنی از ابتدا. |
-| `tangent` | خط مماس در playhead با برچسب `v = <شیب>` |
-| `secant` | خط قاطع از `t=0` تا playhead با برچسب `v̄` |
-| `visible: false` | رسم نمی‌شود ولی در آمار استودیو «پنهان» شمرده می‌شود |
-
-`reveal: true` + `tangent/secant` ترکیب استاندارد «ساخته‌شدن نمودار همراه با
-سرعت لحظه‌ای و متوسط» است.
-
----
-
-## ۱۰. `AnimLayer` و `AnimKey`
+هیچ میدانی به نام سرعت، شتاب، مماس یا قاطع وجود ندارد. همهٔ آن‌ها درخت‌های
+ساده‌ای از گره‌های زیر هستند.
 
 ```ts
-type AnimProp = 'x' | 'y' | 'size' | 'rotation' | 'opacity'
-type Interp = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'step'
-
-type AnimKey = {
+type NodeBase = {
   id: string
-  t: number      // ثانیه — باید صعودی و یکتا باشد
-  v: number      // مقدار
-  interp: Interp // شیب قطعه‌ای که از همین کلید شروع می‌شود
+  name?: string
+  visible?: boolean          // پیش‌فرض true
+  locked?: boolean           // در استودیو قابل انتخاب نیست
+  time?: { start?: number; end?: number }
+  transform: Transform
+  motionPath?: MotionPath
+  style?: NodeStyle
+  description?: string
 }
 
-type AnimLayer = {
+type Transform = {
+  x: NumProp; y: NumProp
+  scaleX: NumProp; scaleY: NumProp
+  rotation: NumProp; opacity: NumProp
+}
+
+type NodeStyle = {
+  fill?: ColorProp
+  stroke?: ColorProp
+  strokeWidth?: NumProp
+  dash?: NumProp                       // طول الگو؛ 0 یعنی یکپارچه
+  trim?: NumProp                       // 0..1 — «چقدر از خط کشیده شده»
+}
+
+type MotionPath = {
+  points: Point2[]                     // [number, number][]
+  closed?: boolean
+  smooth?: boolean                      // Catmull-Rom مرکزگرا
+  /** پیش‌فرض lt/duration؛ برحسب طول کمان اندازه‌گیری می‌شود */
+  progress?: NumProp
+}
+```
+
+### ۸.۱ — `NumProp`: سه حالت
+
+```ts
+type NumProp = number | { expr: string } | { keys: Key[] }
+
+type Key = {
+  id: string        // یکتا در کل انیمیشن، نه در یک ترک
+  t: number
+  v: number
+  ease?: 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'hold' | 'smooth'
+       | `cubic-bezier(${number},${number},${number},${number})`
+}
+
+type ColorProp = string | { keys: { id: string; t: number; v: string }[] }
+type TextProp =
+  | string
+  | { keys: { id: string; t: number; v: string }[] }
+  | { expr: string; format?: string }
+  | { interp: string }        // "v = {round(x + a*t, 2)} m/s"
+```
+
+رنگ‌ها در حالت کلیدی **نگه داشته** می‌شوند، نه درون‌یابی. محو‌بینی دو رنگ
+یعنی دو گره روی هم.
+
+### ۸.۲ — انواع گره
+
+```ts
+type Node =
+  | { id; type: 'rect';    w?; h?; rx? }            // NumProp
+  | { id; type: 'ellipse'; rx?; ry? }
+  | { id; type: 'line';    length?; arrowHead?: { start?; end?; size? } }
+  | { id; type: 'path';    points?: Point2[]; parametric?: { xExpr; yExpr }; closed? }
+  | { id; type: 'text';    text: TextProp; fontSize?; anchor?; latex? }
+  | { id; type: 'image';   href: string; w?; h? }
+  | { id; type: 'plot';    expr?; parametric?; domain?: [number, number];
+                            samples?; draw?: 'line'|'dashed'|'dots'|'fill' }
+  | { id; type: 'group';   children: Node[] }
+  | { id; type: 'axes';    axes: AxesSpec; children: Node[] }
+  | { id; type: 'use';     template: string; props?: Record<string, NumProp> }
+```
+
+> `draw` نه `style` نام‌گذاری شده، چون `style` در هر گره به رنگ و ضخامت خط
+> اشاره دارد و این یکی دربارهٔ خودِ منحنی است.
+
+### ۸.۳ — `axes`: کادر مختصات
+
+```ts
+type AxesSpec = {
+  xDomain: [number, number]
+  yDomain: [number, number]
+  rect: [number, number, number, number]   // کسری از صحنه: [x, y, w, h]
+  ticks?: { x?: number; y?: number }       // سقف 40
+  labels?: { x?: string; y?: string }
+  grid?: boolean
+  arrows?: { x?: boolean; y?: boolean }
+}
+```
+
+فرزندان یک `axes` در **واحدهای دادهٔ** آن مکان می‌گیرند: `x: 2` یعنی «۲ روی
+این محور»، نه «۲ پیکسل». چند `axes` در یک صحنه یعنی چند پنل که یک ساعت را به
+اشتراک می‌گذارند. این جای `scene.panels` و `plotSpace` نسخهٔ ۱ را می‌گیرد.
+
+`rect` را کمی کوچک‌تر از `[0,0,1,1]` بگیرید تا جای تیک و برچسب محور بماند:
+`[0.07, 0.06, 0.9, 0.8]`.
+
+### ۸.۴ — `plot`
+
+```ts
+{ type: 'plot', expr: '0.5*x^2', domain: [0, 8], samples: 160 }
+```
+
+داخل نمودار `x` متغیر محور است و `t` همچنان ساعت صحنه. برای منحنی‌ای که
+تابعی از x نیست (مارپیچ، لیستور) از `parametric: { xExpr, yExpr }` استفاده کنید
+که در `u` ارزیابی می‌شود.
+
+این تفکیک است چیزی است که در نسخهٔ ۱ غیرممکن بود: آنجا `t` هم ساعت بود و هم
+متغیر محور، پس موج روندهٔ `A*sin(k*x - w*t)` اصلاً نوشته نمی‌شد.
+
+نمونه‌های غیرمتناهی حذف می‌شوند و خط به آن‌ها کشیده نمی‌شود. `samples` در
+`LIMITS.maxPlotSamples` (۲۰۰۰) سقف می‌خورد.
+
+### ۸.۵ — `use` و قالب‌ها
+
+```ts
+{ id: 'a1', type: 'use', template: 'freeBodyDiagram',
+  transform: { x: 100, y: 50 },
+  props: { rotation: { expr: 'deg(t)' } } }
+```
+
+بسط `use` خالص و قطعی است: همان انیمیشن همیشه همان درخت را می‌دهد. عمق بسط در
+`LIMITS.maxTemplateDepth` (۸) محدود است و قالبی که خودش را صدا بزند گزارش
+می‌شود و نادیده گرفته می‌شود.
+
+## ۹. `Template`
+
+```ts
+type Template = {
   id: string
   name: string
-  shape: 'circle' | 'square' | 'triangle' | 'arrow' | 'car' | 'ball'
-  color: string
-  visible: boolean
-  mode: 'key' | 'expr' | 'follow'
-  exprX: string
-  exprY: string
-  follow?: string
-  tracks: Partial<Record<AnimProp, AnimKey[]>>
-  showTrail: boolean
-  showVelocity: boolean
-  showAcceleration: boolean
-  vectorScale: number
-  label?: string
-  /** panel id، یا '*' برای کشیدن در همهٔ پنل‌ها */
-  panel?: string
-  /** مسیر رسم‌شده — جایگزینِ فرمول برای حرکت‌های غیرخطی */
-  path?: {
-    points: { x: number; y: number }[]
-    closed?: boolean      // بستن مسیر به‌صورت حلقه
-    show?: boolean        // نمایش خودِ مسیر روی صحنه
-  }
-  /** بردار مکان: از یک نقطهٔ ثابت تا خود جسم */
-  positionVector?: {
-    from: 'origin' | { x: number; y: number }
-    color?: string
-    label?: string
-    dashed?: boolean
-    visible?: boolean
-  }
-  vectors?: {
-    velocity?: boolean
-    acceleration?: boolean
-    /** px به ازای هر واحد بر ثانیه؛ در نبود، `vectorScale` */
-    scale?: number
-    /** تجزیهٔ a به aₜ (مماسی) و aₙ (نرمال) — برای مارپیچ */
-    decomposition?: boolean
-  }
+  description?: string
+  params?: Record<string, Param>
+  nodes: Node[]
 }
 ```
 
-### سه حالت
-
-هر کدام را جداگانه داخل `layers` بگذارید. حالت اول — فرمولی:
-
-```json
-{ "id": "l-car", "name": "خودرو", "shape": "car", "color": "#e11d48",
-  "visible": true, "mode": "expr", "exprX": "2.4*t - 9", "exprY": "0",
-  "tracks": { "size": [{ "id": "k1", "t": 0, "v": 2, "interp": "linear" }] },
-  "showTrail": false, "showVelocity": true, "showAcceleration": true,
-  "vectorScale": 10 }
-```
-
-حالت دوم — کی‌فریمی (بقیهٔ میدان‌ها پیش‌فرض می‌مانند):
-
-```json
-{ "id": "l-ball", "name": "توپ", "shape": "ball", "color": "#f97316",
-  "visible": true, "mode": "key", "exprX": "t * 20", "exprY": "0",
-  "showTrail": true, "showVelocity": false, "showAcceleration": false,
-  "vectorScale": 12,
-  "tracks": {
-    "x": [{ "id": "k1", "t": 0, "v": -6, "interp": "linear" },
-          { "id": "k2", "t": 3, "v":  2, "interp": "easeOut" }],
-    "y": [{ "id": "k3", "t": 0, "v": 0, "interp": "linear" }],
-    "size": [{ "id": "k4", "t": 0, "v": 5, "interp": "linear" }]
-  } }
-```
-
-حالت سوم — سوار بر یک منحنی (`follow` باید به `id` یک `series` اشاره کند):
-
-```json
-{ "id": "l-dot", "name": "نقطهٔ تماس", "shape": "circle", "color": "#7c3aed",
-  "visible": true, "mode": "follow", "follow": "s-x", "exprX": "0", "exprY": "0",
-  "showTrail": false, "showVelocity": false, "showAcceleration": false,
-  "vectorScale": 10,
-  "tracks": { "size": [{ "id": "k5", "t": 0, "v": 0.6, "interp": "linear" }] } }
-```
-
-### جدول میدان‌ها
-
-| میدان | معنی دقیق |
-| --- | --- |
-| `name` | فقط برچسب فهرست استودیو |
-| `label` | متن کنار جسم روی صحنه |
-| `shape` | شکل هندسی؛ `arrow` نوک پیکان به سمت مثبت x دارد |
-| `size` (داخل `tracks`) | **کسری از ارتفاع پنل.** `0.14` یعنی ۱۴٪ ارتفاع پنل، پس در پنل کوتاه و بلند یکسان دیده می‌شود. |
-| `showTrail` | ردّ حرکت؛ در حالت `key` خط‌چین، در `expr` ممتد |
-| `showVelocity`/`showAcceleration` | فلش `v` و `a` با رنگ لایه (و مشکی برای `a`) |
-| `vectorScale` | پیکسل به‌ازای هر واحد/ثانیه. فلش‌ها اگر کوتاه‌تر از ۱۰px شوند اصلاً رسم نمی‌شوند. |
-| `mode: follow` | مختصات = `(t, value of series)`؛ فقط با `plotSpace: 'time'` |
-| `mode: path` | جسم مسیر رسم‌شده را با **سرعت ثابتِ طول قوس** طی می‌کند؛ یعنی `t / duration` روی طول قوس نگاشت می‌شود، نه روی شمارهٔ نقاط. |
-| `positionVector` | پیکان از مبدأ (یا نقطهٔ دلخواه) تا جسم. زاویه‌اش خودکار است، پس هیچ‌وقت آینه‌ای زیر محور نمی‌افتد. |
-
-نکته‌های runtime:
-
-* `opacity` پیش‌فرض ۱؛ اگر جسم از کادر بیرون بزند (`∓80`px) با
-  `opacity: 0.12` نمایش داده می‌شود، نه اینکه حذف شود.
-* `rotation` بر حسب درجه.
-* کلیدهای `x` و `y` باید بر اساس `t` صعودی باشند؛ رندر بین دو کلید
-  درون‌یابی می‌کند.
-* `mode: 'key'` بدون `tracks.x` ⇒ موقعیت صفر (`sampleKeys` مقدار پیش‌فرض
-  می‌دهد)؛ یعنی جسم روی مبدأ می‌ماند بی‌آنکه خطایی بدهد.
+پارامترهای یک قالب در دامنهٔ کامپایل قالب هم هستند؛ به همین دلیل قالبی که
+`vx` را صدا می‌زند پر از «شناسهٔ ناشناخته» نیست.
 
 ---
 
@@ -666,48 +587,76 @@ type BankQuestion = {
 
 ---
 
-## ۱۳. زبان فرمول `expr`
+## ۱۳. زبان فرمول
 
-کامپایلر بسته‌ای، **بدون `eval` و بدون `Function`** — یعنی فرمول کاربر
-هیچ‌وقت به globalهای صفحه دسترسی ندارد.
+دو کامپایلر وجود دارد و هر دو **بدون `eval` و بدون `Function`** — یعنی فرمول
+کاربر هیچ‌وقت به globalهای صفحه دسترسی ندارد.
+
+| | نسخهٔ ۱ — `src/lib/anim/expr.ts` | نسخهٔ ۲ — `src/lib/anim2/expr.ts` |
+| --- | --- | --- |
+| متغیرها | فقط `t` | `t`, `lt`, `x`, `u`, `duration`, هر `param`، ارجاع `@id.prop` |
+| شرط | ندارد | `< > <= >= == != && || !` و `if(c,a,b)` |
+| ضرب ضمنی | ندارد | `2t`، `3(t+1)`، `2pi`، `(a)(b)` |
+| مشتق | ندارد | `d(expr)` |
+| ارجاع بین‌گرهی | ندارد | `@body.x`، `@plot.at(x)` |
+| بازخورد ویرایشگر | `check(src)` ⇒ `{ ok, error, at }` | `validateExpr(src, scope)` ⇒ `{ ok, deps }` \| `{ ok:false, message, pos }` |
+
+> `check(src)` نسخهٔ ۱ **دست‌نخورده** مانده است؛ ویرایشگر قدیمی هنوز از آن
+> استفاده می‌کند.
+
+### ۱۳.۱ — نسخهٔ ۲
 
 | بخش | دقیقاً چه چیزهایی |
 | --- | --- |
-| متغیر | فقط `t` (و نام‌های هم‌معنی `time`, `زمان`) — زمان بر حسب ثانیه |
-| ثابت | `pi` `π` `e` `tau` `phi` |
-| عملگر | `+` `-` `*` `/` `%` `^` و معادل‌های فارسی `×` `÷` `−` `٪` |
-| تابع | `sin cos tan asin acos atan sinh cosh tanh sqrt abs exp ln log floor ceil round sign atan2 min max pow mod hypot` |
-| عدد | اعشاری، با `.` یا `٫`، و **ارقام فارسی/عربی** (`۲٫۵` = `2.5`) |
-| گروه‌بندی | پرانتز `(` `)` |
-| جداکنندهٔ آرگومان | `,` |
+| متغیر | `t` (ساعت صحنه)، `lt` (زمان محلی گره)، `x` (متغیر محور)، `u` (پارامتر منحنی)، `duration` |
+| ثابت | `pi` `e` `tau` `phi` |
+| عملگر | `+ - * / % ^` (توان راست‌شرکت‌پذیر)، `< > <= >= == !=`، `&& || !` |
+| ضرب ضمنی | `2t`، `3(t+1)`، `2pi`، `(a)(b)` |
+| تابع | `sin cos tan asin acos atan sinh cosh tanh sqrt abs exp ln log log2 log10 floor ceil round trunc frac sign mod pow min max hypot atan2 deg rad clamp lerp smoothstep step if dist dot len` |
+| ویژه | `d(expr)` مشتق نسبت به `t` |
+| عدد | اعشاری و **ارقام فارسی/عربی** (`۲٫۵` = `2.5`)، و توان علمی (`1.5e3`) |
+| شناسه | حساس به بزرگی/کوچکی حروف، و می‌تواند فارسی باشد: `شتاب` |
 
-### مواردی که خطا می‌دهند
+`atan2` رادیان برمی‌گرداند. `rotation` همیشه **درجه** است، پس بنویسید
+`deg(atan2(vy, vx))`.
+
+#### نام‌های رزرو‌شده
+
+`RESERVED` صادر می‌کند: `t`, `lt`, `x`, `u`, `duration`, `time`, `زمان`, `pi`,
+`e`, `tau`, `phi`, `true`, `false`, `if`, `and`, `or`, `not` و نام همهٔ توابع.
+تعریف یک متغیر با این نام‌ها باید هنگام ورود رد شود، نه هنگام رندر.
+
+#### مواردی که خطا می‌دهند
 
 * `t**2` → باید `t^2`
-* `v = 2*t` → `=` پشتیبانی نمی‌شود (در `expr` فرمول است، نه معادله)
-* نام ناشناخته (`x`, `a`, `g`) ⇒ خطا
+* `v = 2*t` → `=` پشتیبانی نمی‌شود
+* نام تعریف‌نشده (`a`, `g`) ⇒ خطا
 * تابع ناشناخته ⇒ خطا
-* تقسیم بر صفر ⇒ `Infinity` ⇒ با `NaN` یکسان شمرده می‌شود و آن نقطه از
-  مسیر حذف می‌شود (خط شکسته بدون پرش)
+* تقسیم بر صفر ⇒ `Infinity` (که هنگام رسم نمونه حذف می‌شود، نه اینکه کل منحنی را
+  از بین ببرد)
 
-### رفتار خطا
-
-`evalExpr(src, t, fallback)` هیچ‌وقت throw نمی‌کند:
+### ۱۳.۲ — خطا هیچ‌وقت رندر را نمی‌شکند
 
 | حالت | نتیجه |
 | --- | --- |
-| فرمول خالی | `fallback` |
-| فرمول نامعتبر | `fallback` |
-| نتیجهٔ غیرمتناهی | `fallback` |
-| فراخوانی تابع با آرگومان غلط | `catch` ⇒ `fallback` |
+| فرمول خالی | مقدار پیش‌فرض |
+| فرمول نامعتبر | مقدار پیش‌فرض + یک هشدار در `compiled.warnings` |
+| نتیجهٔ `NaN` | `0` — یک فرمول خراب نباید کل صحنه را سفید کند |
+| ارجاع حلقوی | آن گره صفر + هشدار |
+| فرمول بیش از ۵۰۰ نویسه | مقدار پیش‌فرض + هشدار |
 
-برای `series` مقدار `fallback` برابر `NaN` است، پس نقطه از مسیر کنار گذاشته
-می‌شود؛ برای `layer` مقدار `0` است، پس جسم در مبدأ می‌ماند. یعنی **فرمول
-خراب هیچ‌وقت صفحه را نمی‌شکند، ولی بی‌صدا چیزی نشان نمی‌دهد.**
+پیام خطا فارسی است و **موقعیت نویسه** را دارد:
+`شناسهٔ ناشناخته «foo» — ناحیهٔ ۵`.
 
-برای بازخورد زنده در استودیو از `check(src)` استفاده می‌شود که
-`{ ok, error, at }` برمی‌گرداند — این تنها جایی است که پیام خطای واقعی
-کاربر می‌بیند.
+### ۱۳.۳ — کارایی
+
+* خروجی هر گره یک درخت بستهٔ توابع است؛ در حلقهٔ هر فریم **هیچ تخصیص
+  حافظه‌ای** انجام نمی‌شود.
+* `getSnapshot` ساعت را به‌صورت یک `number` برمی‌گرداند، پس
+  `useSyncExternalStore` بر اساس مقدار مقایسه می‌کند.
+* کش کامپایل LRU با سقف ۵۰۰ ورودی، و کلیدش شامل دامنه است — پس همان فرمول
+  زیر دو دامنهٔ متفاوت می‌تواند متفاوت کامپایل شود.
+* مشتق (`d()`) در زمان کامپایل ساخته می‌شود، نه در هر فریم.
 
 ---
 
@@ -988,6 +937,87 @@ localStorage ذخیره می‌کند (debounce ۷۰۰ms) و پس از بستن�
 ویرایش، حذف یا مرتب کنید.
 
 ---
+
+## ۱۹ج. افزوده‌های v2 (متغیر، شرط، رسم، لنگر، شکل، کنترل)
+
+### متغیرهای صحنه
+
+```ts
+type Animation2 = {
+  vars?: Record<string, string>   // نام → فرمول
+}
+```
+
+نام‌ها به ترتیب وابستگی مرتب می‌شوند؛ چرخه گزارش می‌شود (`cyclic`) و به‌جای
+عدد غلط صفر برمی‌گردد. نام‌های رزرو‌شده (`t`, `lt`, `x`, `u`, `duration`,
+`d`, نام توابع) نادیده گرفته و هشدار می‌گیرند.
+
+### شرط‌ها و ذرات
+
+```ts
+type AnimEventDef = {
+  id: string
+  when: string              // شرط بولی
+  actions: AnimAction[]
+  once?: boolean            // پیش‌فرض true
+  cooldown?: number         // ثانیه
+}
+```
+
+روی **لبهٔ صعودی** اجرا می‌شوند. `spawnParticles` در `lib/anim2/particles.ts`
+استخری با سقف سخت دارد؛ نقطهٔ `at` در واحدهای خودِ صحنه است.
+
+### رسم‌ها
+
+```ts
+type Drawing = ArrowDrawing | DimensionDrawing | ProtractorDrawing | LabelDrawing
+```
+
+زیر گره‌ها کشیده می‌شوند و کادر انتخاب ندارند.
+
+### لنگرها
+
+```ts
+node.anchors = { top: { x: 0, y: '-r' } }
+```
+
+با `@id@name.x` و `@id@name.y` خوانده می‌شود؛ لنگر با چرخش گره می‌چرخد.
+
+### شکل‌ها
+
+```ts
+type ShapeDef = { path: string; params?: Record<string, NumProp>; offset?: {...} }
+```
+
+در مسیر، `w` `h` `r` `a` `n` اعدادِ آزادند و با پارامترهای گره جایگزین
+می‌شوند. حروف فرمان (`M`, `L`, …) جانشین نمی‌شوند مگر آنکه جای مقدار نیایند.
+
+### کنترل‌ها
+
+```ts
+param.control = 'slider' | 'toggle' | 'select' | 'button'
+param.options  // برچسب‌های select
+param.actions  // کنش‌های دکمه
+param.pulseFor // ثانیه تا بازگشت
+```
+
+همه روی یک عدد می‌نشینند، پس `when: "show == 1"` برای toggle درست است.
+پرچم قدیمی `slider` هنوز کار می‌کند.
+
+### پخش
+
+```ts
+playback: { segments?, pingPong?, startAt?, stopAt?, rate? }
+```
+
+بخش‌ها هم‌پوشان ادغام و وارونه جابه‌جا می‌شوند؛ ساعت همیشه یک مرز معتبر دارد.
+
+### برون‌بری
+
+`lib/anim2/exporters.ts` — `exportScene(svg, 'svg' | 'png' | 'pdf')`.
+متغیرهای CSS پیش از سریال‌سازی درون‌خطی می‌شوند، وگرنه فایل خروجی بی‌رنگ
+می‌شود. PDF از راه رسترکردن PNG ساخته می‌شود، چون PDF بدون موتور قلم
+متن را نمی‌چیند.
 
 ## ۲۰. حدود و نکات
 

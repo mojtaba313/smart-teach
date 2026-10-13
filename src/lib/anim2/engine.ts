@@ -27,8 +27,13 @@ import {
   ANIM2_SCHEMA,
   LIMITS,
 } from '../../types/anim2'
-import { BASE_VARS, compileExpr, type CompiledExpr, type EvalEnv, ExprError } from './expr'
+import { BASE_VARS, compileExpr, type CompiledExpr, type EvalEnv, ExprError, type Scope } from './expr'
 import { prepareTrack, sampleTrack, sampleTrackDerivative, type Track } from './keys'
+import { describeVars, planVars, resolveVars, type VarPlan } from './vars'
+import { planEvents, type EventPlan } from './events'
+import { resolveDrawings, type DrawingWarning } from './drawings'
+import { anchorNames, anchorsOf, resolveAnchors } from './anchors'
+import { planShapes, type ShapeRegistry } from './shapes'
 
 /* ------------------------------------------------------------------ *
  *  Compiled forms
@@ -60,10 +65,17 @@ export type CompiledNode = {
     strokeWidth?: CompiledProp
     dash?: CompiledProp
     trim?: CompiledProp
+    fillOpacity?: CompiledProp
+    blur?: CompiledProp
+    hueRotate?: CompiledProp
+    brightness?: CompiledProp
   }
   /** Set for path/rect/ellipse/line/text/image/plot; absent for groups. */
   shape?: Record<string, CompiledProp | CompiledColor>
   plot?: CompiledPlot
+  /** Registry key for a `shape` node; the outline is measured per frame. */
+  shapeId?: string
+  shapeParams?: Record<string, NumProp>
   text?: CompiledText
   motionPath?: CompiledPath
   children?: CompiledNode[]
@@ -116,6 +128,14 @@ export type CompiledAnimation = {
   autoplay: boolean
   speed: number
   params: Record<string, Param>
+  /** Derived quantities, compiled and topologically sorted. */
+  vars: VarPlan
+  /** Conditions, compiled, with per-event edge state. */
+  events: EventPlan
+  /** Names an expression may read here. Drawings share it. */
+  scope: Scope['vars']
+  /** Node ids a `@ref` may point at. */
+  refIds: ReadonlySet<string>
   cues: Cue[]
   nodes: CompiledNode[]
   /** Node ids in an order where referenced nodes come first. */
@@ -484,14 +504,73 @@ export function compileAnimation(input: Animation2): CompiledAnimation {
   const refIds = new Set<string>()
   const plotIds = new Set<string>()
   collectIds(expanded, refIds, plotIds)
+  // `@body@top` must resolve during compilation, so the anchor names join the
+  // known references up front rather than being discovered at draw time.
+  for (const name of anchorNames(expanded)) refIds.add(name)
 
-  // Template parameters are names too: a template that mentions `vx` must be
+  // Three sources of names beyond the language itself: parameters, scene
+  // variables, and template parameters. A template that mentions `vx` must be
   // compiled with `vx` in scope, or every arrow in the library warns.
   const vars = new Set<string>([...BASE_VARS, ...Object.keys(anim.params ?? {})])
+  for (const name of Object.keys(anim.vars ?? {})) vars.add(name)
   for (const tpl of Object.values(anim.templates ?? {})) {
     for (const name of Object.keys(tpl.params ?? {})) vars.add(name)
   }
+  // An anchor may reference its own node's shape, which is what makes
+  // `{ "y": "-r" }` work without the author repeating the radius. `self` is
+  // the escape hatch for anything not worth adding a scope entry for.
+  const anchorScope = new Set(vars)
+  anchorScope.add('self')
+  for (const n of expanded) {
+    for (const a of Object.values(anchorsOf(n))) {
+      for (const raw of [a.x, a.y]) {
+        const src = typeof raw === 'string' ? raw : typeof raw === 'object' && 'expr' in raw ? raw.expr : null
+        if (!src) continue
+        try {
+          // Compile against the node's own shape names first, so `-r` resolves;
+          // anything left over joins the shared scope.
+          for (const dep of compileExpr(src, { vars: shapeNamesOf(n), refIds }).deps) anchorScope.add(dep)
+        } catch {
+          // Reported when the anchor is resolved, not here.
+        }
+      }
+    }
+  }
+  for (const name of anchorScope) vars.add(name)
+
+  // Drawings read the same namespace as everything else, so a force arrow can
+  // be written as `{ expr: "F" }`. Their free names join the scope too.
+  for (const src of drawingExpressions(anim.drawings)) {
+    try {
+      for (const dep of compileExpr(src, { vars, refIds }).deps) vars.add(dep)
+    } catch {
+      // A malformed drawing reports itself at draw time; here it only means
+      // the name cannot be discovered up front.
+    }
+  }
+
   const ctx: CompileCtx = { vars, refIds, plotIds, warnings }
+
+  // Scene variables can read params and each other, so they are planned with
+  // the parameter names in scope.
+  const varPlan = planVars(anim.vars, Object.keys(anim.params ?? {}))
+  const varWhy = describeVars(varPlan)
+  if (varWhy) {
+    for (const name of varPlan.reserved) {
+      warnings.push({ nodeId: 'scene', field: `vars.${name}`, message: `نام رزرو‌شده — نادیده گرفته شد` })
+    }
+    for (const name of varPlan.broken) {
+      warnings.push({ nodeId: 'scene', field: `vars.${name}`, message: 'فرمول متغیر خوانده نشد' })
+    }
+    for (const name of varPlan.cyclic) {
+      warnings.push({ nodeId: 'scene', field: `vars.${name}`, message: 'ارجاع حلقوی بین متغیرها' })
+    }
+  }
+
+  const eventPlan = planEvents(anim.events, [...vars])
+  for (const id of eventPlan.broken) {
+    warnings.push({ nodeId: 'scene', field: `events.${id}`, message: 'شرط رویداد خوانده نشد' })
+  }
 
   const compiledNodes = expanded.map((node) => compileNode(node, ctx, duration))
   const byId = new Map<string, CompiledNode>()
@@ -514,6 +593,7 @@ export function compileAnimation(input: Animation2): CompiledAnimation {
   for (const n of compiledNodes) scanTime(n, () => {
     dependsOnTime = true
   })
+  if (varPlan.order.some((v) => v.fn.timeDependent)) dependsOnTime = true
 
   return {
     anim,
@@ -522,6 +602,10 @@ export function compileAnimation(input: Animation2): CompiledAnimation {
     autoplay: anim.autoplay === true,
     speed: typeof anim.speed === 'number' && anim.speed > 0 ? anim.speed : 1,
     params: anim.params ?? {},
+    vars: varPlan,
+    events: eventPlan,
+    scope: vars,
+    refIds,
     cues: [...(anim.cues ?? [])].sort((a, b) => a.t - b.t),
     nodes: compiledNodes,
     order,
@@ -530,6 +614,19 @@ export function compileAnimation(input: Animation2): CompiledAnimation {
     static: !dependsOnTime,
     hash: hashOf(anim),
   }
+}
+
+/** A node's own scalar shape fields, so an anchor can write `-r` for its r. */
+function shapeNamesOf(node: Node): Set<string> {
+  const out = new Set<string>()
+  for (const [k, v] of Object.entries(node as unknown as Record<string, unknown>)) {
+    if (k === 'type' || k === 'id' || k === 'style' || k === 'time' || k === 'transform') continue
+    if (typeof v === 'number') out.add(k)
+    else if (v && typeof v === 'object' && typeof (v as { expr?: unknown }).expr === 'string') {
+      out.add(k)
+    }
+  }
+  return out
 }
 
 function collectIds(nodes: readonly Node[], ids: Set<string>, plots: Set<string>): void {
@@ -572,6 +669,14 @@ function compileNode(node: Node, ctx: CompileCtx, duration: number): CompiledNod
     style.strokeWidth = strokeWidth
     style.dash = dash
     style.trim = trim
+    const fillOpacity = compileNum(rawStyle.fillOpacity, 1, node.id, 'style.fillOpacity', ctx)
+    const blur = compileNum(rawStyle.blur, 0, node.id, 'style.blur', ctx)
+    const hueRotate = compileNum(rawStyle.hueRotate, 0, node.id, 'style.hueRotate', ctx)
+    const brightness = compileNum(rawStyle.brightness, 1, node.id, 'style.brightness', ctx)
+    if (fillOpacity !== undefined) style.fillOpacity = fillOpacity
+    if (blur !== undefined) style.blur = blur
+    if (hueRotate !== undefined) style.hueRotate = hueRotate
+    if (brightness !== undefined) style.brightness = brightness
   }
 
   const out: CompiledNode = {
@@ -651,6 +756,13 @@ function compileNode(node: Node, ctx: CompileCtx, duration: number): CompiledNod
     out.children = (node.children ?? []).map((c) => compileNode(c, ctx, duration))
   }
 
+  // A shape keeps only its identity at compile time; the outline is measured
+  // per frame, because its parameters are usually expressions in `t`.
+  if (node.type === 'shape') {
+    out.shapeId = String(node.shape ?? '')
+    out.shapeParams = node.params ?? {}
+  }
+
   recomputeDependsOnTime(out)
   return out
 }
@@ -684,7 +796,15 @@ function recomputeDependsOnTime(node: CompiledNode): void {
   let time = false
   for (const p of Object.values(node.transform)) if (propTimeDependent(p)) time = true
   if (node.style) {
-    for (const p of [node.style.strokeWidth, node.style.dash, node.style.trim]) {
+    for (const p of [
+      node.style.strokeWidth,
+      node.style.dash,
+      node.style.trim,
+      node.style.fillOpacity,
+      node.style.blur,
+      node.style.hueRotate,
+      node.style.brightness,
+    ]) {
       if (propTimeDependent(p)) time = true
     }
     if (node.style.fill?.k === 'keys' && node.style.fill.timeDependent) time = true
@@ -812,6 +932,17 @@ export type ResolvedNode = {
   shape: Record<string, number>
   /** Resolved text, when the node has any. */
   text?: string
+  /** Style extras, resolved for this frame. */
+  fillOpacity?: number
+  blur?: number
+  hueRotate?: number
+  brightness?: number
+  /** Registry key for a `shape` node. */
+  shapeId?: string
+  /** Instance parameters overriding the shape's defaults. */
+  shapeParams?: Record<string, NumProp>
+  /** The outline itself, measured for this frame. */
+  shapePath?: { d: string; offset: { x: number; y: number } }
   /** The compiled curve, for a plot node. The renderer needs the expression. */
   plot?: CompiledPlot
   children: ResolvedNode[]
@@ -834,6 +965,10 @@ export type Frame = {
 
 type Ctx = {
   compiled: CompiledAnimation
+  /** Shape registry for this frame; outlines are measured, not compiled. */
+  shapes: ShapeRegistry
+  /** Expression scope, shared with the shape resolver. */
+  scope: Scope
   /** Values already resolved at the current frame, keyed by node id. */
   done: Map<string, ResolvedNode>
   v: Record<string, number>
@@ -850,6 +985,15 @@ function paramValues(compiled: CompiledAnimation, overrides?: Record<string, num
     if (Number.isFinite(value)) v[k] = value
   }
   return v
+}
+
+/**
+ * Parameters and scene variables share one namespace, so any expression can
+ * read either. Variables are resolved *per frame* — they read `t`.
+ */
+function valueNamespace(compiled: CompiledAnimation, t: number, overrides?: Record<string, number>): Record<string, number> {
+  const params = paramValues(compiled, overrides)
+  return resolveVars(compiled.vars, { t, lt: t, x: t, u: 0, duration: compiled.duration, v: params }, params)
 }
 
 function inWindow(node: CompiledNode, t: number): boolean {
@@ -930,13 +1074,96 @@ function interpolateText(src: string, env: EvalEnv): string {
   })
 }
 
+/** Parameters, controls and scene variables as one name→value map. */
+export function valueOf(
+  compiled: CompiledAnimation,
+  t: number,
+  paramOverrides?: Record<string, number>,
+): Record<string, number> {
+  return valueNamespace(compiled, t, paramOverrides)
+}
+
+/** Every expression string a drawing carries, for scope discovery. */
+function drawingExpressions(list: Animation2['drawings']): string[] {
+  if (!list) return []
+  const out: string[] = []
+  const push = (v: unknown): void => {
+    if (v && typeof v === 'object' && 'expr' in v && typeof (v as { expr: unknown }).expr === 'string') {
+      out.push((v as { expr: string }).expr)
+    }
+  }
+  const pushPoint = (p: { x: unknown; y: unknown } | undefined): void => {
+    push(p?.x)
+    push(p?.y)
+  }
+  for (const d of list) {
+    switch (d.kind) {
+      case 'arrow':
+        pushPoint(d.from)
+        pushPoint(d.to)
+        push(d.curvature)
+        push(d.style?.width)
+        push(d.style?.opacity)
+        push(d.style?.headSize)
+        break
+      case 'dimension':
+        pushPoint(d.from)
+        pushPoint(d.to)
+        push(d.offset)
+        push(d.style?.width)
+        push(d.style?.opacity)
+        break
+      case 'protractor':
+        pushPoint(d.center)
+        push(d.radius)
+        push(d.startDeg)
+        push(d.endDeg)
+        push(d.style?.width)
+        push(d.style?.opacity)
+        break
+      case 'label':
+        pushPoint(d.at)
+        push(d.size)
+        push(d.rotation)
+        break
+    }
+  }
+  return out
+}
+
+/**
+ * Resolve the drawing layer for a frame. Kept beside `evaluate` so a renderer
+ * only needs one call site; a drawing that throws is dropped with a warning
+ * rather than taking the scene with it.
+ */
+export function resolveDrawingLayer(
+  compiled: CompiledAnimation,
+  t: number,
+  paramOverrides?: Record<string, number>,
+): { resolved: ReturnType<typeof resolveDrawings>['resolved']; warnings: DrawingWarning[] } {
+  const list = compiled.anim.drawings
+  if (!list || list.length === 0) return { resolved: [], warnings: [] }
+  const scope: Scope = { vars: compiled.scope, refIds: compiled.refIds }
+  const env: EvalEnv = {
+    t,
+    lt: t,
+    x: t,
+    u: compiled.duration === 0 ? 0 : t / compiled.duration,
+    duration: compiled.duration,
+    v: valueNamespace(compiled, t, paramOverrides),
+  }
+  return resolveDrawings(list, env, scope)
+}
+
 export function evaluate(
   compiled: CompiledAnimation,
   t: number,
   paramOverrides?: Record<string, number>,
 ): Frame {
   const warnings: Warning[] = []
-  const v = paramValues(compiled, paramOverrides)
+  const v = valueNamespace(compiled, t, paramOverrides)
+  const shapes = planShapes(compiled.anim.shapes)
+  const scope: Scope = { vars: compiled.scope, refIds: compiled.refIds }
   const done = new Map<string, ResolvedNode>()
   const byId = new Map<string, CompiledNode>()
   const indexAll = (list: CompiledNode[]) => {
@@ -947,7 +1174,16 @@ export function evaluate(
   }
   indexAll(compiled.nodes)
 
-  const ctx: Ctx = { compiled, done, v, warnings, cyclic: compiled.cyclic, visiting: new Set() }
+  const ctx: Ctx = {
+    compiled,
+    shapes,
+    scope,
+    done,
+    v,
+    warnings,
+    cyclic: compiled.cyclic,
+    visiting: new Set(),
+  }
 
   const resolver: EvalEnv = {
     t,
@@ -957,7 +1193,11 @@ export function evaluate(
     duration: compiled.duration,
     v,
     refAt: (path, at) => {
-      const dot = path.indexOf('.')
+      // An anchor reference is `id@name.x`, so the id must stop at the `@`,
+      // not at the first dot — otherwise `body@top.x` splits into a node called
+      // `body@top`, which never exists.
+      const at2 = path.indexOf('@')
+      const dot = path.indexOf('.', at2 === -1 ? 0 : at2 + 1)
       const id = path.slice(0, dot)
       const prop = path.slice(dot + 1)
       const target = byId.get(id)
@@ -978,7 +1218,105 @@ export function evaluate(
   }
   ctx.visiting = new Set()
 
-  for (const node of compiled.nodes) resolveNodeWithEnv(node, t, ctx, resolver)
+  /**
+   * Anchor points for one node, from its own resolved transform. An anchor is
+   * local to its node, so this needs no other node's position and no cycle
+   * check — it is a fixed point, not a dependency.
+   *
+   * The map is filled in *as the node pass proceeds* rather than after it,
+   * because a node reading `@body@top` may well come before `body` in document
+   * order. Reading a not-yet-resolved anchor yields 0 for that frame instead of
+   * throwing, which is the same rule the rest of the engine uses for a forward
+   * reference.
+   */
+  const anchorPoints = new Map<string, { x: number; y: number }>()
+  const anyAnchor = compiled.nodes.some((n) => Object.keys(anchorsOf(n.raw)).length > 0)
+
+  const anchorsFor = (id: string, at: number, scratch: Ctx): ReadonlyMap<string, { x: number; y: number }> => {
+    const src = compiled.nodes.find((n) => n.id === id)
+    if (!src) return new Map()
+    const r = at === t ? done.get(id) : scratch.done.get(id)
+    return resolveAnchors(
+      [{
+        id,
+        transform: {
+          x: r?.x ?? 0,
+          y: r?.y ?? 0,
+          angle: r?.rotation ?? 0,
+          scaleX: r?.scaleX ?? 1,
+          scaleY: r?.scaleY ?? 1,
+        },
+        anchors: anchorsOf(src.raw),
+      }],
+      { t: at, lt: at, x: at, u: 0, duration: compiled.duration, v },
+      { vars: compiled.scope, refIds: compiled.refIds },
+    ).points
+  }
+
+  const env: EvalEnv = {
+    ...resolver,
+    refAt: (path, at) => {
+      const a2 = path.indexOf('@')
+      if (a2 > 0) {
+        const dot = path.indexOf('.', a2 + 1)
+        const id = path.slice(0, a2)
+        const rest = dot === -1 ? path.slice(a2 + 1) : path.slice(a2 + 1, dot)
+        const axis = dot === -1 ? 'xy' : path.slice(dot + 1)
+        const p = at === t ? anchorPoints.get(`${id}@${rest}`) : anchorsFor(id, at, ctx).get(`${id}@${rest}`)
+        if (!p) return 0
+        // `.xy` reads the pair's length, which is what a distance formula wants.
+        if (axis === 'x') return p.x
+        if (axis === 'y') return p.y
+        return Math.hypot(p.x, p.y)
+      }
+      return resolver.refAt!(path, at)
+    },
+  }
+
+  /**
+   * Anchors depend on their node's transform and on nothing else, so one
+   * evaluation is enough — but only once every node has run. That is why the
+   * pass runs twice when a scene uses anchors: the second pass is what makes
+   * `@body@top` work from a node declared *above* `body`, which is the common
+   * authoring order for a label that reports a distance. Scenes without
+   * anchors take the single pass and pay nothing.
+   */
+  const passes = anyAnchor ? 2 : 1
+  for (let pass = 0; pass < passes; pass++) {
+    // `done` *is* `ctx.done`; clearing only the context would leave the frame
+    // cache pointing at first-pass results that predate the anchors.
+    if (pass === 1) done.clear()
+    // The whole node pass first, anchors after: filling them per node would
+    // still leave a node declared above its target reading an empty map.
+    for (const node of compiled.nodes) resolveNodeWithEnv(node, t, ctx, env)
+    if (anyAnchor) {
+      for (const node of compiled.nodes) {
+        for (const [k, v] of anchorsFor(node.id, t, ctx)) anchorPoints.set(k, v)
+      }
+    }
+  }
+  if (anyAnchor) {
+    for (const node of compiled.nodes) {
+      const r = done.get(node.id)
+      for (const w of resolveAnchors(
+        [{
+          id: node.id,
+          transform: {
+            x: r?.x ?? 0,
+            y: r?.y ?? 0,
+            angle: r?.rotation ?? 0,
+            scaleX: r?.scaleX ?? 1,
+            scaleY: r?.scaleY ?? 1,
+          },
+          anchors: anchorsOf(node.raw),
+        }],
+        { t, lt: t, x: t, u: 0, duration: compiled.duration, v },
+        { vars: compiled.scope, refIds: compiled.refIds },
+      ).warnings) {
+        warnings.push({ nodeId: node.id, field: `anchors.${w.anchor}`, message: w.message })
+      }
+    }
+  }
 
   return { t, nodes: compiled.nodes.map((n) => done.get(n.id)!).filter(Boolean), warnings }
 }
@@ -1035,7 +1373,18 @@ function resolveNodeWithEnv(node: CompiledNode, t: number, ctx: Ctx, env: EvalEn
   }
 
   if (node.plot) out.plot = node.plot
+  if (node.shapeId) {
+    out.shapePath =
+      ctx.shapes.resolve(node.shapeId, node.shapeParams, local, ctx.scope) ?? undefined
+    if (!out.shapePath) {
+      ctx.warnings.push({ nodeId: node.id, field: 'shape', message: `شکل «${node.shapeId}» یافت نشد` })
+    }
+  }
   if (style?.fill) out.fill = readColor(style.fill, t)
+  if (style?.fillOpacity) out.fillOpacity = read(style.fillOpacity, 1)
+  if (style?.blur) out.blur = read(style.blur, 0)
+  if (style?.hueRotate) out.hueRotate = read(style.hueRotate, 0)
+  if (style?.brightness) out.brightness = read(style.brightness, 1)
   if (style?.stroke) out.stroke = readColor(style.stroke, t)
   if (node.text) out.text = readText(node.text, local, ctx, node.id)
 

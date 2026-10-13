@@ -155,6 +155,9 @@ const byType: Record<Node['type'], PropSpec[]> = {
     { path: 'axes.ticks.y', label: 'تیک y', kind: 'number', fallback: 5, min: 0, max: 40, step: 1, group: GROUPS.shape },
     { path: 'axes.grid', label: 'شبکه', kind: 'boolean', fallback: true, group: GROUPS.shape },
   ],
+  shape: [
+    { path: 'shape', label: 'شکل', kind: 'text', fallback: '', hint: 'نام یک شکل از جدول شکل‌ها', group: GROUPS.shape },
+  ],
   use: [
     { path: 'template', label: 'قالب', kind: 'text', fallback: '', hint: 'نام یک قالب از کتابخانه', group: GROUPS.shape },
   ],
@@ -165,6 +168,7 @@ export const NODE_TYPES: { type: Node['type']; label: string }[] = [
   { type: 'ellipse', label: 'دایره' },
   { type: 'line', label: 'خط' },
   { type: 'path', label: 'مسیر' },
+  { type: 'shape', label: 'شکل' },
   { type: 'text', label: 'متن' },
   { type: 'image', label: 'تصویر' },
   { type: 'plot', label: 'نمودار' },

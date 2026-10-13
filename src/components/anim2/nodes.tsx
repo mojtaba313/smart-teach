@@ -13,6 +13,8 @@
 
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ResolvedNode } from '../../lib/anim2/engine'
+import { ParticleSystem, particleFade } from '../../lib/anim2/particles'
+import { adjustColor } from '../../lib/anim2/color'
 import { plotPoints } from '../../lib/anim2/engine'
 import type { Frame, View } from './geometry'
 import { makeFrame, pointsToD, smoothStroke, tickLabel, ticksFor } from './geometry'
@@ -128,6 +130,29 @@ const Shape = memo(function Shape({ node, frame }: { node: ResolvedNode; frame: 
 
     case 'path':
       return <PathShape node={node} frame={frame} p={p} />
+
+    case 'shape': {
+      // A shape is a measured outline, so it draws as a `<path>` even though
+      // its identity lives in the registry rather than in the node.
+      const sp = node.shapePath
+      if (!sp) return null
+      const off = sp.offset
+      return (
+        <path
+          d={sp.d}
+          transform={off.x || off.y ? `translate(${off.x} ${off.y})` : undefined}
+          fill={adjustColor((node.fill ?? 'none') as string, node.hueRotate, node.brightness)}
+          stroke={adjustColor(
+            (node.stroke ?? 'rgb(var(--scene-ink))') as string,
+            node.hueRotate,
+            node.brightness,
+          )}
+          strokeWidth={node.strokeWidth}
+          fillOpacity={node.fillOpacity}
+          filter={node.blur ? `blur(${node.blur}px)` : undefined}
+        />
+      )
+    }
 
     case 'image':
       return (
@@ -485,6 +510,72 @@ const AxesFrame = memo(function AxesFrame({
 /* ------------------------------------------------------------------ *
  *  Tree walk
  * ------------------------------------------------------------------ */
+
+/**
+ * Sparks. Drawn as a flat overlay rather than as nodes, so a burst costs no
+ * scene-graph churn, and every mark is keyed by index because the pool is fixed.
+ */
+export const ParticleLayer = memo(function ParticleLayer({
+  particles,
+  version,
+  map,
+}: {
+  particles: ParticleSystem
+  /**
+   * The system mutates in place, so its identity never changes. Without this
+   * counter `memo` would compare one object to itself, skip the re-render, and
+   * the sparks would exist but never appear.
+   */
+  version?: number
+  /**
+   * Data units to scene units. The simulation runs in the scene's own
+   * coordinate space, so an event that spawns at (0,0) lands on the origin of
+   * the axes rather than the top-left pixel of the canvas. Undefined means the
+   * scene is already in screen units.
+   */
+  map?: (x: number, y: number) => { x: number; y: number }
+}) {
+  void version
+  const live = particles.live
+  if (live.length === 0) return null
+  const at = map ?? ((x: number, y: number) => ({ x, y }))
+  return (
+    <g aria-hidden="true">
+      {live.map((p, i) => {
+        const fade = particleFade(p)
+        if (p.shape === 'star') {
+          return (
+            <polygon
+              key={i}
+              points={`0,${-p.size} ${p.size * 0.3},${-p.size * 0.3} ${p.size},0 ${p.size * 0.3},${p.size * 0.3} 0,${p.size} ${-p.size * 0.3},${p.size * 0.3} ${-p.size},0 ${-p.size * 0.3},${-p.size * 0.3}`}
+              transform={`translate(${at(p.x, p.y).x} ${at(p.x, p.y).y})`}
+              fill={p.color}
+              opacity={fade}
+            />
+          )
+        }
+        if (p.shape === 'spark') {
+          const c = at(p.x, p.y)
+          return (
+            <line
+              key={i}
+              x1={c.x - Math.cos(p.angle) * p.size * 3}
+              y1={c.y + Math.sin(p.angle) * p.size * 3}
+              x2={c.x + Math.cos(p.angle) * p.size * 3}
+              y2={c.y - Math.sin(p.angle) * p.size * 3}
+              stroke={p.color}
+              strokeWidth={1.6}
+              strokeLinecap="round"
+              opacity={fade}
+            />
+          )
+        }
+        const c = at(p.x, p.y)
+        return <circle key={i} cx={c.x} cy={c.y} r={p.size * (0.4 + fade * 0.6)} fill={p.color} opacity={fade} />
+      })}
+    </g>
+  )
+})
 
 export type RenderContext = {
   frame: Frame

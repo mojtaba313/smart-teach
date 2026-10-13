@@ -1,23 +1,32 @@
 # استودیوی تدریس — Smart Teach Studio
 
-یک استودیوی کامل برای ساخت درس‌های تعاملی فارسی: بدون پاورپوینت، بدون سرور،
-و **کاملاً آفلاین**. همه‌چیز در مرورگر ذخیره می‌شود و با یک `Ctrl/Cmd + K`
-یا چند کلید میان‌بر می‌توان کل ارائه را ساخت، چید و اجرا کرد.
+یک استودیوی کامل برای ساخت درس‌های تعاملی فارسی: بدون پاورپوینت، و
+**کاملاً آفلاین‌پسند** — داده اول در مرورگر نوشته می‌شود تا برنامه فوری کار کند و
+بعد در پس‌زمینه همگام می‌شود.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # tsc -b && vite build
-npm run preview
+npm run dev      # http://localhost:3000
+npm run build    # prisma generate && next build
+npm start        # prisma migrate deploy && next start
 npm run lint
+npm test         # vitest
 ```
 
----
+### پیکربندی
 
-> **Next.js + PostgreSQL.** اپ روی App Router اجرا می‌شود (`npm run dev`)،
-> API داخل خودش Route Handler است، و داده در PostgreSQL از طریق Prisma.
-> صفحه‌ها کلاینت‌کامپوننت‌اند (`src/screens`) چون داده را از کش و پایگاه دادهٔ
-> مرورگر می‌خوانند.
+```bash
+cp .env.example .env      # DATABASE_URL را تنظیم کنید
+```
+
+بدون `DATABASE_URL` هم `npm run build` کار می‌کند (در زمان ساخت به دیتابیس
+نیازی نیست)، ولی برای اجرا لازم است.
+
+> **Next.js 16 + PostgreSQL.** اپ روی App Router اجرا می‌شود، API داخل خودش
+> Route Handler است، و داده در PostgreSQL از طریق Prisma. صفحه‌ها
+> کلاینت‌کامپوننت‌اند (`src/screens`) چون داده را از کش می‌خوانند.
+> PostgreSQL **منبع حقیقت** است؛ `localStorage` کش نوشتن‌-through و صف ناهمگام
+> است (`smart-teach:pending:v1`).
 
 ## چه چیزی هست
 
@@ -148,10 +157,14 @@ src/
     bank/                  ویرایشگر برچسب، انتخابگر پرسش، درخت
     editor/                ویرایشگر هر نوع کادر + کارت کادر
     dnd/Sortable.ts        حسگرها، دستگیره، شبکهٔ قابل مرتب‌سازی
-  pages/                   Create · View · Bank · Studio
+  screens/                 Create · View · Bank · Studio
+  app/                     مسیرها (App Router) + Route Handlerهای API
+  lib/anim2/               موتور انیمیشن نسخهٔ ۲ (بدون React، قابل تست)
+  types/anim2.ts           طرح‌وارهٔ نسخهٔ ۲
+  model/migrateAnimationV1toV2.ts
 ```
 
-**قالب‌بندی:** همه‌چیز از متغیرهای CSS در `src/index.css` رنگ می‌گیرد
+**قالب‌بندی:** همه‌چیز از متغیرهای CSS در `src/app/globals.css` رنگ می‌گیرد
 (`--bg`, `--elev`, `--ink`, `--brand`, `--scene`, …) و تم‌های روشن/کاغذی/تیره
 فقط همین متغیرها را بازنویسی می‌کنند. به این ترتیب هر کادر خودش را با تم هماهنگ
 می‌کند — چیزی که در نسخهٔ قبلی اشتباه بود و کادرها در تم تیره هم روشن می‌ماندند.
@@ -205,10 +218,10 @@ src/
 کافی است یکی از این دو فایل را به یک مدل زبانی بدهید و خروجی را با
 «ورودی JSON…» وارد کنید.
 
-## پایگاه داده (Prisma + SQLite)
+## پایگاه داده (Prisma + PostgreSQL)
 
-داده‌ها دیگر فقط در مرورگر نیستند. یک سرور کوچک با Prisma آن‌ها را در
-SQLite نگه می‌دارد و **localStorage نقش کش نوشتن‌-through** را دارد: هر
+داده‌ها دیگر فقط در مرورگر نیستند. Prisma آن‌ها را در PostgreSQL نگه می‌دارد
+و **localStorage نقش کش نوشتن‌-through** را دارد: هر
 تغییر اول در مرورگر می‌نشیند تا برنامه فوری و آفلاین کار کند، بعد در پس‌زمینه
 به پایگاه داده push می‌شود. اگر سرور در دسترس نباشد، نشان بالای صفحه
 «آفلاین» می‌شود و هیچ‌چیز از دست نمی‌رود.

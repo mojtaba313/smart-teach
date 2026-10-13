@@ -33,6 +33,7 @@ import {
   type TimeView,
 } from '../../lib/anim2/timeline'
 import { modeOf, propsFor, readPath, writePath } from '../../lib/anim2/schema'
+import { moveWindow, resizeWindow, type TimeWindow } from '../../lib/anim2/studio'
 import { uid } from '../../types/anim2'
 import { cn, toFaDigits } from '../../lib/utils'
 
@@ -49,7 +50,8 @@ export type TimelineProps = {
   view: TimeView
   onView: (view: TimeView) => void
   onSeek: (t: number) => void
-  onSelect: (id: string) => void
+  /** `additive` is set by a shift- or ctrl-click. */
+  onSelect: (id: string, additive?: boolean) => void
   /** Called on pointerup only, so a drag is one history entry. */
   onEdit: (nodeId: string, path: string, next: unknown, coalesceKey: string) => void
   onBegin?: () => void
@@ -102,6 +104,45 @@ export const Timeline = memo(function Timeline({
     const rect = e.currentTarget.getBoundingClientRect()
     const anchor = xToTime(e.clientX - rect.left - LABEL_W, view, laneWidth)
     onView(zoomAt(view, anchor, e.deltaY > 0 ? 1.2 : 1 / 1.2, anim.duration))
+  }
+
+  /* ---- dragging a time-window clip ---- */
+  const startClipDrag = (
+    e: React.PointerEvent<HTMLDivElement>,
+    nodeId: string,
+    edge: 'move' | 'start' | 'end',
+  ) => {
+    e.stopPropagation()
+    const src = findNode(nodes, nodeId)
+    if (!src) return
+    const start = src.time?.start ?? 0
+    const end = src.time?.end ?? anim.duration
+    const before: TimeWindow = { start, end }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    onBegin?.()
+    const el = lane.current
+
+    // Movement is measured from the pointer's own start rather than from the
+    // current value, so a window clamped against an edge does not accumulate
+    // drift while the pointer keeps going.
+    const move = (ev: PointerEvent) => {
+      const box = el?.getBoundingClientRect()
+      const px = ev.clientX - e.clientX
+      const span = view.end - view.start
+      const d = box && box.width > 0 ? (px / box.width) * span : 0
+      const next =
+        edge === 'move'
+          ? moveWindow(before, d, anim.duration)
+          : resizeWindow(before, edge, (edge === 'start' ? start : end) + d, anim.duration)
+      onPreview?.(nodeId, 'time', next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setDrag(false)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
   }
 
   /* ---- dragging a keyframe ---- */
@@ -212,7 +253,7 @@ export const Timeline = memo(function Timeline({
                 <span className="size-2 shrink-0 rounded-full" style={{ background: row.color ?? '#94a3b8' }} />
                 <button
                   type="button"
-                  onClick={() => onSelect(row.nodeId)}
+                  onClick={(e) => onSelect(row.nodeId, e.shiftKey || e.metaKey || e.ctrlKey)}
                   className="min-w-0 flex-1 truncate text-start font-bold text-ink-2"
                 >
                   {row.label}
@@ -269,14 +310,32 @@ export const Timeline = memo(function Timeline({
                   selected === row.nodeId && 'bg-brand-soft/30',
                 )}
                 style={{ height: ROW_H }}
-                onClick={() => onSelect(row.nodeId)}
+                onClick={(e) => onSelect(row.nodeId, e.shiftKey || e.metaKey || e.ctrlKey)}
               >
                 {/* clip bar */}
                 {row.start !== undefined || row.end !== undefined ? (
                   <div
                     className="absolute top-1/2 h-3 -translate-y-1/2 rounded-sm bg-brand/25"
                     style={{ left, width: Math.max(2, right - left) }}
-                  />
+                  >
+                    {/* The body moves the window; the edges resize it. Handles
+                        sit outside the bar so a thin window stays grabbable. */}
+                    <div
+                      role="presentation"
+                      className="absolute inset-0 cursor-grab"
+                      onPointerDown={(e) => startClipDrag(e, row.nodeId, 'move')}
+                    />
+                    <div
+                      role="presentation"
+                      className="absolute -start-1 -top-1 h-5 w-2 cursor-ew-resize"
+                      onPointerDown={(e) => startClipDrag(e, row.nodeId, 'start')}
+                    />
+                    <div
+                      role="presentation"
+                      className="absolute -end-1 -top-1 h-5 w-2 cursor-ew-resize"
+                      onPointerDown={(e) => startClipDrag(e, row.nodeId, 'end')}
+                    />
+                  </div>
                 ) : null}
 
                 <svg className="absolute inset-0 h-full w-full" width={laneWidth} height={ROW_H}>

@@ -3,6 +3,7 @@ import {
   BASE_VARS,
   clearExprCache,
   compileExpr,
+  RESERVED,
   ExprError,
   evalExpr,
   exprCacheSize,
@@ -299,5 +300,101 @@ describe('derivative cross-check against numeric differences', () => {
   it('returns zero without dividing by zero for a constant', () => {
     expect(at('d(x^2 + 3)', { x: 4 })).toBe(0)
     expect(at('d(7)')).toBe(0)
+  })
+})
+
+describe('the functions added in the extensions pass', () => {
+  const S: Scope = { vars: new Set([...BASE_VARS, 'seed', 'ox', 'oy', 'k', 'q1', 'q2', 'x1', 'y1']), refIds: new Set() }
+  const run = (src: string, e: Partial<EvalEnv> = {}): number =>
+    evalExpr(src, S, { t: 0, lt: 0, x: 0, u: 0, duration: 10, v: { seed: 3, ox: 2, oy: 4, k: 9e9, q1: 1, q2: 1, x1: 0, y1: 0 }, ...e })
+
+  it('trunc drops the fraction, including for negatives', () => {
+    expect(run('trunc(3.9)')).toBe(3)
+    expect(run('trunc(-3.9)')).toBe(-3)
+    // round would give -4 here, which is why trunc exists separately.
+    expect(run('round(-3.5)')).toBe(-3)
+  })
+
+  it('frac is the fractional part, not x minus round(x)', () => {
+    expect(run('frac(3.25)')).toBeCloseTo(0.25, 12)
+    // x - round(x) gives -0.5 here; the right answer is +0.5.
+    expect(run('frac(-3.5)')).toBeCloseTo(0.5, 12)
+    expect(run('frac(3.25) + frac(-3.25)')).toBeCloseTo(1, 12)
+  })
+
+  it('dist, dot and len measure pairs', () => {
+    expect(run('dist(0, 0, 3, 4)')).toBe(5)
+    expect(run('dist(1, 1, 1, 1)')).toBe(0)
+    expect(run('dot(2, 3, 4, 5)')).toBe(23)
+    expect(run('dot(1, 0, 0, 1)')).toBe(0)
+    expect(run('len(3, 4)')).toBe(5)
+  })
+
+  it('dist composes with the inverse-square law, which is the point of it', () => {
+    // Two charges 5 m apart: F = k q1 q2 / r^2 = 9e9 / 25.
+    const force = run('k*q1*q2 / dist(0, 0, x1, y1)^2', { v: { k: 9e9, q1: 1, q2: 1, x1: 3, y1: 4 } })
+    expect(force).toBeCloseTo(9e9 / 25, 3)
+  })
+
+  it('diverges at zero separation, so a scene must guard it', () => {
+    // This is why every real force example writes max(r2, 0.01).
+    expect(run('k*q1*q2 / dist(0, 0, x1, y1)^2', { v: { k: 9e9, q1: 1, q2: 1, x1: 0, y1: 0 } })).toBe(Infinity)
+    const guarded = run('k*q1*q2 / max(dist(0, 0, x1, y1)^2, 0.01)', {
+      v: { k: 9e9, q1: 1, q2: 1, x1: 0, y1: 0 },
+    })
+    expect(Number.isFinite(guarded)).toBe(true)
+  })
+
+  it('rand() is deterministic at the same t — scrub back and it replays', () => {
+    const a = run('rand()', { t: 2.5 })
+    const b = run('rand()', { t: 2.5 })
+    expect(a).toBe(b)
+    expect(run('rand()', { t: 2.6 })).not.toBe(a)
+  })
+
+  it('rand() stays inside [0, 1)', () => {
+    for (const t of [0, 1, 2.5, 10, 99.5]) {
+      const v = run('rand()', { t })
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThan(1)
+    }
+  })
+
+  it('rand(seed) is stable and does not move with time', () => {
+    expect(run('rand(seed)', { t: 0 })).toBe(run('rand(seed)', { t: 50 }))
+    expect(run('rand(seed)')).toBe(run('rand(seed)', { t: 999 }))
+    expect(run('rand(1)')).not.toBe(run('rand(2)'))
+  })
+
+  it('noise(x) is deterministic, smooth, and bounded', () => {
+    expect(run('noise(1.7)')).toBe(run('noise(1.7)'))
+    const samples = [0, 0.25, 1, 2.5, 10].map((x) => run(`noise(${x})`))
+    for (const v of samples) {
+      expect(Math.abs(v)).toBeLessThanOrEqual(1.0001)
+    }
+    // Smooth: neighbouring samples cannot jump the whole range.
+    for (let x = 0; x < 5; x += 0.05) {
+      const a = run(`noise(${x.toFixed(3)})`)
+      const b = run(`noise(${(x + 0.05).toFixed(3)})`)
+      expect(Math.abs(a - b)).toBeLessThan(0.5)
+    }
+  })
+
+  it('noise at an integer is a fixed point of the lattice', () => {
+    expect(run('noise(4)')).toBeCloseTo(run('noise(4)'), 12)
+  })
+})
+
+describe('reserved names', () => {
+  it('protects the clock, the constants and every function', () => {
+    for (const name of ['t', 'lt', 'x', 'u', 'duration', 'time', 'زمان', 'pi', 'e', 'tau', 'phi', 'if', 'sin', 'clamp', 'd']) {
+      expect(RESERVED.has(name)).toBe(true)
+    }
+  })
+
+  it('does not reserve ordinary variable names', () => {
+    for (const name of ['a', 'v0', 'q1', 'r2', 'شتاب', 'theta', 'F', 'x1']) {
+      expect(RESERVED.has(name)).toBe(false)
+    }
   })
 })

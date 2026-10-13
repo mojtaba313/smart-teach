@@ -23,6 +23,7 @@ import {
   Pencil,
   Spline,
   Square,
+  Triangle as TriangleIcon,
   Type as TypeIcon,
   UnfoldVertical,
   Waves,
@@ -42,6 +43,7 @@ const ICON: Record<Node['type'], typeof Square> = {
   axes: LayersIcon,
   group: UnfoldVertical,
   use: LayersIcon,
+  shape: TriangleIcon,
 }
 
 export function SceneTree({
@@ -61,7 +63,8 @@ export function SceneTree({
   nodes: readonly Node[]
   selected: string | null
   expanded: ReadonlySet<string>
-  onSelect: (id: string) => void
+  /** `additive` is set by a shift- or ctrl-click. */
+  onSelect: (id: string, additive?: boolean) => void
   onToggleExpand: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void
@@ -102,7 +105,7 @@ export function SceneTree({
               )}
               <button
                 type="button"
-                onClick={() => onSelect(node.id)}
+                onClick={(e) => onSelect(node.id, e.shiftKey || e.metaKey || e.ctrlKey)}
                 className="flex min-w-0 flex-1 items-center gap-1 text-start"
               >
                 <Icon className="size-3 shrink-0 text-ink-3" />
@@ -155,7 +158,8 @@ export function SceneTreePanel(props: {
   nodes: readonly Node[]
   selected: string | null
   expanded: ReadonlySet<string>
-  onSelect: (id: string) => void
+  /** `additive` is set by a shift- or ctrl-click. */
+  onSelect: (id: string, additive?: boolean) => void
   onToggleExpand: (id: string) => void
   onToggleVisible: (id: string) => void
   onToggleLock: (id: string) => void

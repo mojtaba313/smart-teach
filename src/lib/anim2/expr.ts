@@ -151,12 +151,26 @@ export function tokenize(src: string): Tok[] {
     }
     const pos = i + 1
 
-    // @ref
+    // @ref, optionally `@id@anchor` to address a named attachment point.
     if (c === '@') {
       i += 1
       const start = i
       while (i < n && isIdentPart(src[i])) i += 1
       if (i === start) err('بعد از @ باید نام یک جسم بیاید', pos, 'ref')
+      if (src[i] === '@') {
+        const anchorStart = i + 1
+        let j = anchorStart
+        while (j < n && isIdentPart(src[j])) j += 1
+        if (j === anchorStart) err('بعد از @ دوم باید نام لنگر بیاید', pos, 'ref')
+        out.push({
+          kind: 'ref',
+          text: `${src.slice(start, i)}@${src.slice(anchorStart, j)}`,
+          value: 0,
+          pos,
+        })
+        i = j
+        continue
+      }
       out.push({ kind: 'ref', text: src.slice(start, i), value: 0, pos })
       continue
     }
@@ -259,6 +273,13 @@ export const FUNCTIONS: Record<string, { arity: number; fn: Fn; derivable: boole
   floor: { arity: 1, fn: Math.floor, derivable: false },
   ceil: { arity: 1, fn: Math.ceil, derivable: false },
   round: { arity: 1, fn: Math.round, derivable: false },
+  trunc: { arity: 1, fn: Math.trunc, derivable: false },
+  // The fractional part. Not `x - round(x)`: that is wrong for negatives.
+  frac: {
+    arity: 1,
+    fn: (x: number) => x - Math.floor(x),
+    derivable: true,
+  },
   sign: { arity: 1, fn: Math.sign, derivable: false },
   // two arguments
   atan2: { arity: 2, fn: Math.atan2, derivable: true },
@@ -280,6 +301,15 @@ export const FUNCTIONS: Record<string, { arity: number; fn: Fn; derivable: boole
   lerp: { arity: 3, fn: (a, b, t) => a + (b - a) * t, derivable: true },
   // step(edge, x): 0 below the edge, 1 at or above it
   step: { arity: 2, fn: (edge, x) => (x >= edge ? 1 : 0), derivable: false },
+  // Geometry helpers, for 2-D scenes where `x` and `y` are separate vars.
+  // Declared with arity 0/1 so the parser accepts them; evaluated in `build`,
+  // because they read the clock. `derivable` is false: a jittery signal has
+  // no meaningful derivative.
+  rand: { arity: 1, fn: () => 0, derivable: false },
+  noise: { arity: 1, fn: () => 0, derivable: false },
+  dist: { arity: 4, fn: (x1: number, y1: number, x2: number, y2: number) => Math.hypot(x2 - x1, y2 - y1), derivable: false },
+  dot: { arity: 4, fn: (x1: number, y1: number, x2: number, y2: number) => x1 * x2 + y1 * y2, derivable: false },
+  len: { arity: 2, fn: (x: number, y: number) => Math.hypot(x, y), derivable: false },
   smoothstep: {
     arity: 3,
     fn: (e0, e1, x) => {
@@ -295,7 +325,43 @@ export const FUNCTIONS: Record<string, { arity: number; fn: Fn; derivable: boole
  *  Parser
  * ------------------------------------------------------------------ */
 
-const CONSTANTS: Record<string, number> = { pi: Math.PI, e: Math.E, tau: Math.PI * 2 }
+const CONSTANTS: Record<string, number> = { pi: Math.PI, e: Math.E, tau: Math.PI * 2, phi: (1 + Math.sqrt(5)) / 2 }
+
+/**
+ * Names a scene variable may never take. Overwriting `t` with a scene var
+ * would silently break every animation on the page, so this is refused loudly
+ * at import rather than at render.
+ */
+export const RESERVED: ReadonlySet<string> = new Set([
+  't', 'lt', 'x', 'u', 'duration', 'time', 'زمان', 'مگه', 'd',
+  'pi', 'e', 'tau', 'phi', 'true', 'false', 'if', 'and', 'or', 'not',
+  ...Object.keys(FUNCTIONS),
+])
+
+/** `rand()` is seeded by the clock, so scrubbing back replays the same values. */
+function hash01(n: number): number {
+  // A cheap integer hash (xorshift-style avalanche). Deterministic across
+  // machines, unlike Math.random.
+  let h = Math.imul(Math.floor(n * 1e6) | 0, 0x27d4eb2d)
+  h ^= h >>> 15
+  h = Math.imul(h, 0x85ebca6b)
+  h ^= h >>> 13
+  return (h >>> 0) / 4294967296
+}
+
+/** 1-D gradient noise in roughly [-1, 1]; smooth, deterministic, no dependency. */
+function noise1(x: number): number {
+  const i = Math.floor(x)
+  const f = x - i
+  const grad = (k: number) => {
+    // Hash the lattice point to a gradient in {-1, +1}.
+    return hash01(k) < 0.5 ? -1 : 1
+  }
+  const a = grad(i)
+  const b = grad(i + 1)
+  const u = f * f * (3 - 2 * f)
+  return a + (b - a) * u
+}
 
 class Parser {
   private i = 0
@@ -467,6 +533,7 @@ class Parser {
           }
         }
         if (!def) err(`تابعی به نام «${t.text}» نیست`, t.pos, 'function')
+        if (t.text === 'rand' && args.length === 0) return { k: 'call', name: 'rand', args, pos: t.pos }
         if (def.arity === 1 && args.length !== 1) {
           err(`تابع «${t.text}» یک آرگومان می‌خواهد، نه ${fa(args.length)}`, t.pos, 'arity')
         }
@@ -599,6 +666,23 @@ function build(node: Ast, scope: Scope): Fn1 {
     case 'call': {
       const args = node.args.map((a) => build(a, scope))
       if (node.name === 'd') return build(differentiate(node.args[0]), scope)
+
+      // `rand` and `noise` need the clock, which a plain function table cannot
+      // see. They are handled here and declared with arity 0/1/1 above so the
+      // parser still checks them and the editor still lists them.
+      if (node.name === 'rand') {
+        if (args.length === 0) return (e) => hash01(e.t)
+        const seed = args[0]
+        // An explicit seed means a *stable* value you can reason about — the
+        // clock only drives the unseeded form. Mixing t in here made a seeded
+        // "random" number creep every frame, which is neither random nor fixed.
+        return (e) => hash01(seed(e))
+      }
+      if (node.name === 'noise') {
+        const a = args[0]
+        return (e) => noise1(a(e))
+      }
+
       const def = FUNCTIONS[node.name]
       if (!def) return err(`تابعی به نام «${node.name}» نیست`, node.pos, 'function')
       const fn = def.fn
@@ -617,6 +701,13 @@ function build(node: Ast, scope: Scope): Fn1 {
           const b = args[1]
           const c = args[2]
           return (e) => fn(a(e), b(e), c(e))
+        }
+        case 4: {
+          const a = args[0]
+          const b = args[1]
+          const c = args[2]
+          const d = args[3]
+          return (e) => fn(a(e), b(e), c(e), d(e))
         }
         default:
           return err(`تابع «${node.name}» آرگومان بیش از حد دارد`, node.pos, 'arity')

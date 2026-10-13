@@ -14,7 +14,10 @@ import {
   type Node,
   emptyTransform,
 } from '../../types/anim2'
-import { compileAnimation, evaluate, plotPoints } from '../../lib/anim2/engine'
+import { compileAnimation, evaluate, plotPoints, valueOf } from '../../lib/anim2/engine'
+import { evalPoint, planEvents, stepEvents } from '../../lib/anim2/events'
+import { MAX_PARTICLES, ParticleSystem } from '../../lib/anim2/particles'
+import type { EvalEnv } from '../../lib/anim2/expr'
 import { templateLibrary } from '../../lib/anim2/templates'
 import { freeFrame, makeFrame, ticksFor, trimPath, viewFor } from './geometry'
 
@@ -429,5 +432,195 @@ describe('axes frames', () => {
     expect(compiled.nodes).toHaveLength(2)
     // Both frames advance with the same clock; that is the point of panels.
     expect(evaluate(compiled, 1)).not.toBeNull()
+  })
+})
+
+describe('scene variables reach the renderer', () => {
+  const anim = scene(
+    [
+      {
+        id: 'charge1',
+        type: 'ellipse',
+        transform: { ...T(), x: { expr: 'x1' }, y: { expr: 'y1' } },
+        style: { fill: '#dc2626' },
+      },
+      {
+        id: 'charge2',
+        type: 'ellipse',
+        transform: { ...T(), x: { expr: 'x2' }, y: { expr: 'y2' } },
+        style: { fill: '#2563eb' },
+      },
+    ],
+    {
+      duration: 10,
+      params: { q1: { value: 2 }, q2: { value: -2 } },
+      vars: {
+        x1: '-3 + 0.3 * t',
+        y1: '0',
+        x2: '3 - 0.3 * t',
+        y2: '0',
+        r2: '(x2 - x1)^2',
+        F: '9e9 * q1 * q2 / max(r2, 0.01)',
+      },
+    },
+  )
+
+  it('compiles with no warnings', () => {
+    expect(compileAnimation(anim).warnings).toEqual([])
+  })
+
+  it('moves both charges according to the clock', () => {
+    const at = (t: number) => evaluate(compileAnimation(anim), t).nodes
+    expect(at(0)[0].x).toBeCloseTo(-3, 9)
+    expect(at(5)[0].x).toBeCloseTo(-1.5, 9)
+    expect(at(5)[1].x).toBeCloseTo(1.5, 9)
+  })
+
+  it('re-evaluates variables every frame rather than freezing them', () => {
+    // The bug this guards: resolving variables once, at t = 0.
+    const c = compileAnimation(anim)
+    const x0 = evaluate(c, 0).nodes[0].x
+    const x6 = evaluate(c, 6).nodes[0].x
+    expect(x6).not.toBeCloseTo(x0, 6)
+  })
+
+  it('lets a control override change the result live, without moving t', () => {
+    const c = compileAnimation(anim)
+    const base = evaluate(c, 0).nodes[0].x
+    const moved = evaluate(c, 0, { q1: 9 }).nodes[0].x
+    // Positions come from `vars`, which do not read q1 here, so only the
+    // derived quantities change — which is the point of separating them.
+    expect(moved).toBeCloseTo(base, 9)
+    const closer = { ...anim, vars: { ...anim.vars, x1: '-3 + q1 * t' } }
+    expect(evaluate(compileAnimation(closer), 1, { q1: 9 }).nodes[0].x).toBeCloseTo(6, 9)
+  })
+
+  it('reports a bad variable without failing the scene', () => {
+    const broken = { ...anim, vars: { ...anim.vars, oops: '1 +' } }
+    const c = compileAnimation(broken)
+    expect(c.warnings.some((w) => w.field === 'vars.oops')).toBe(true)
+    expect(() => evaluate(c, 2)).not.toThrow()
+  })
+
+  it('reports a cycle without failing the scene', () => {
+    const looped = { ...anim, vars: { ...anim.vars, p: 'q', q: 'p' } }
+    const c = compileAnimation(looped)
+    expect(c.warnings.some((w) => w.message.includes('حلقوی'))).toBe(true)
+    expect(() => evaluate(c, 2)).not.toThrow()
+  })
+
+  it('refuses a variable that would shadow the language', () => {
+    const shadowed = { ...anim, vars: { ...anim.vars, t: '99' } }
+    const c = compileAnimation(shadowed)
+    expect(c.warnings.some((w) => w.field === 'vars.t')).toBe(true)
+    // The clock is untouched.
+    expect(evaluate(c, 3).nodes[0].x).toBeCloseTo(evaluate(compileAnimation(anim), 3).nodes[0].x, 9)
+  })
+})
+
+describe('an event drives a real particle burst', () => {
+  /**
+   * The whole chain in one scene: two charges approaching, a condition on
+   * their separation, and a burst of sparks at the midpoint. If this passes,
+   * events, variables, particles and the clock are wired to each other.
+   */
+  const anim = scene(
+    [
+      { id: 'c1', type: 'ellipse', transform: { ...T(), x: { expr: 'x1' }, y: 0 } },
+      { id: 'c2', type: 'ellipse', transform: { ...T(), x: { expr: 'x2' }, y: 0 } },
+    ],
+    {
+      duration: 10,
+      params: { q1: { value: 2 }, q2: { value: -2 } },
+      vars: { x1: '-3 + 0.3 * t', x2: '3 - 0.3 * t', r: 'x2 - x1' },
+      events: [
+        {
+          id: 'spark',
+          when: 'r < 3',
+          actions: [
+            { type: 'spawnParticles', at: ['(x1 + x2) / 2', '0'], count: 24, color: '#fbbf24', speed: 3, lifetime: 0.8, shape: 'spark' },
+            { type: 'flash', target: 'c1', color: '#fbbf24', duration: 0.2 },
+          ],
+        },
+      ],
+    },
+  )
+
+  it('compiles both the variables and the condition', () => {
+    const c = compileAnimation(anim)
+    expect(c.warnings).toEqual([])
+    expect(c.vars.order.map((v) => v.name)).toEqual(['x1', 'x2', 'r'])
+    expect(c.events.events.map((e) => e.id)).toEqual(['spark'])
+  })
+
+  it('stays quiet while the charges are far apart', () => {
+    const plan = planEvents(anim.events, ['r', 'x1', 'x2'])
+    const compiled = compileAnimation(anim)
+    const env: EvalEnv = { t: 0, lt: 0, x: 0, u: 0, duration: 10, v: { ...valueOf(compiled, 0) } }
+    expect(stepEvents(plan, 0, env).fired).toEqual([])
+  })
+
+  it('fires once as they close, and the burst lands between them', () => {
+    const compiled = compileAnimation(anim)
+    const plan = planEvents(anim.events, ['r', 'x1', 'x2'])
+    const particles = new ParticleSystem()
+
+    let fired = 0
+    for (let t = 0; t <= 10; t += 1 / 60) {
+      const env: EvalEnv = { t, lt: t, x: t, u: 0, duration: 10, v: { ...valueOf(compiled, t) } }
+      const out = stepEvents(plan, t, env)
+      if (out.actions.length === 0) continue
+      fired += out.fired.length
+      for (const a of out.actions) {
+        if (a.type === 'spawnParticles') {
+          const at = evalPoint(a.at, env)
+          particles.spawn(at, { count: a.count, color: a.color, speed: a.speed, lifetime: a.lifetime, shape: a.shape })
+        }
+      }
+    }
+
+    // r < 3 first holds at t = 5, so exactly one burst in the whole run.
+    expect(fired).toBe(1)
+    expect(particles.live.length).toBe(24)
+    // The burst is at the midpoint: 0 by the symmetry of the setup.
+    const meanX = particles.live.reduce((sum, p) => sum + p.x, 0) / particles.live.length
+    expect(Math.abs(meanX)).toBeLessThan(0.001)
+    expect(particles.live.every((p) => p.color === '#fbbf24')).toBe(true)
+  })
+
+  it('survives the whole lifecycle and cleans itself up', () => {
+    const compiled = compileAnimation(anim)
+    const plan = planEvents(anim.events, ['r', 'x1', 'x2'])
+    const particles = new ParticleSystem()
+    for (let t = 0; t <= 10; t += 1 / 60) {
+      const env: EvalEnv = { t, lt: t, x: t, u: 0, duration: 10, v: { ...valueOf(compiled, t) } }
+      for (const a of stepEvents(plan, t, env).actions) {
+        if (a.type === 'spawnParticles') {
+          const at = evalPoint(a.at, env)
+          particles.spawn(at, { count: a.count, color: a.color, speed: a.speed, lifetime: a.lifetime, shape: a.shape })
+        }
+      }
+      particles.step(1 / 60)
+    }
+    // The burst happened around t = 5 and lives 0.8 s, so by t = 10 it is gone.
+    expect(particles.live).toHaveLength(0)
+    expect(particles.count).toBeLessThanOrEqual(MAX_PARTICLES)
+  })
+
+  it('a control override can delay the burst, because it changes r', () => {
+    const slower = {
+      ...anim,
+      vars: { x1: '-3 + 0.2 * t', x2: '3 - 0.2 * t', r: 'x2 - x1' },
+    }
+    const compiled = compileAnimation(slower)
+    const plan = planEvents(slower.events, ['r'])
+    let firedAt = -1
+    for (let t = 0; t <= 10 && firedAt < 0; t += 1 / 60) {
+      const env: EvalEnv = { t, lt: t, x: t, u: 0, duration: 10, v: { ...valueOf(compiled, t) } }
+      if (stepEvents(plan, t, env).fired.length) firedAt = t
+    }
+    // Closing at 0.2 instead of 0.3 pushes the crossing from 5 s to 7.5 s.
+    expect(firedAt).toBeGreaterThan(7)
+    expect(firedAt).toBeLessThan(8)
   })
 })

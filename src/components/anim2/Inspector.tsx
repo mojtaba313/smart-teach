@@ -14,13 +14,14 @@
 
 import { memo, useMemo } from 'react'
 import { AlertCircle, KeyRound, Link2, Sigma } from 'lucide-react'
-import type { Animation2, Key, Node, NumProp } from '../../types/anim2'
+import type { AnimAction, Animation2, Key, Node, NumProp } from '../../types/anim2'
 import { uid } from '../../types/anim2'
 import { validateExpr } from '../../lib/anim2/expr'
 import { groupedProps, modeOf, readPath, valueOf, writePath, type PropMode, type PropSpec } from '../../lib/anim2/schema'
 import { dedupeKeys } from '../../lib/anim2/timeline'
 import { BUILTIN_TEMPLATES } from '../../lib/anim2/templates'
 import { cn, toFaDigits } from '../../lib/utils'
+import { controlKind } from './Controls'
 
 export type NodeChange = (nodeId: string, next: Node) => void
 
@@ -318,10 +319,16 @@ export function NodeInspector({
 export function ParamsPanel({
   anim,
   onParam,
+  onAction,
 }: {
   anim: Animation2
   onParam: (name: string, patch: Record<string, unknown> | null) => void
+  /** Forwards a control's own actions to the scene runtime. */
+  onAction?: (name: string, actions: readonly AnimAction[]) => void
 }) {
+  // Editing here writes the document; the player's panel writes local state.
+  // Both end up as the same number, so a formula never has to care which.
+  const onValue = (name: string, value: number): void => onParam(name, { value })
   const entries = Object.entries(anim.params ?? {})
   return (
     <div className="space-y-2 p-2">
@@ -346,6 +353,7 @@ export function ParamsPanel({
       {entries.map(([name, param]) => (
         <div key={name} className="space-y-1 rounded-lg bg-sunken/50 p-1.5">
           <div className="flex items-center gap-1.5">
+            {controlKind(param) === 'slider' ? <span className="text-2xs text-ink-3">{param.label ?? name}</span> : null}
             <input
               value={param.label ?? name}
               onChange={(e) => onParam(name, { label: e.target.value })}
@@ -362,7 +370,55 @@ export function ParamsPanel({
             </button>
           </div>
           <div className="flex items-center gap-1.5">
-            {param.slider ? (
+            {controlKind(param) === 'toggle' ? (
+              <button
+                type="button"
+                role="switch"
+                aria-checked={param.value >= 0.5}
+                aria-label={param.label ?? name}
+                onClick={() => {
+                  const next = param.value >= 0.5 ? 0 : 1
+                  onValue(name, next)
+                  if (param.actions) onAction?.(name, param.actions)
+                }}
+                className={cn(
+                  'flex h-7 items-center gap-1.5 rounded-md border px-2 text-2xs',
+                  param.value >= 0.5 ? 'border-brand bg-brand/10 text-brand' : 'border-hairline bg-surface text-ink-3',
+                )}
+              >
+                <span className={cn('h-3 w-3 rounded-full', param.value >= 0.5 ? 'bg-brand' : 'bg-hairline')} />
+                {param.value >= 0.5 ? 'روشن' : 'خاموش'}
+              </button>
+            ) : controlKind(param) === 'select' ? (
+              <select
+                value={String(Math.round(param.value))}
+                aria-label={param.label ?? name}
+                onChange={(e) => {
+                  const next = parseInt(e.target.value, 10)
+                  if (!Number.isNaN(next)) onValue(name, next)
+                }}
+                className="h-7 rounded-md border border-hairline bg-surface px-1.5 text-2xs"
+              >
+                {(param.options ?? []).map((o, i) => (
+                  <option key={`${o}-${i}`} value={i}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            ) : controlKind(param) === 'button' ? (
+              <button
+                type="button"
+                aria-label={param.label ?? name}
+                onClick={() => {
+                  const back = param.resetTo ?? 0
+                  onValue(name, param.value === back ? 1 : back)
+                  if (param.actions) onAction?.(name, param.actions)
+                }}
+                className="h-7 rounded-md border border-hairline bg-surface px-2 text-2xs hover:border-brand/50 hover:text-brand"
+              >
+                {param.label ?? name}
+              </button>
+            ) : param.slider !== false ? (
               <input
                 type="range"
                 min={param.min ?? 0}
