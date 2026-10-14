@@ -5,6 +5,8 @@ import { cn, toFaDigits } from '../../lib/utils'
 import { Button, IconButton, Input, Segmented, Textarea } from '../ui/primitives'
 import { StepView } from '../blocks'
 import { RichText } from '../blocks/RichText'
+import { ImageUpload } from './ImageUpload'
+import { TableEditor } from './TableEditor'
 
 const FA = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹']
 
@@ -322,6 +324,7 @@ export function StepEditor(props: EditorProps) {
             placeholder="https://… آدرس تصویر"
             className="text-start"
           />
+          <ImageUpload onUploaded={(url) => onChange({ ...step, value: url })} />
           <div className="grid gap-2 sm:grid-cols-2">
             <Input value={step.alt ?? ''} onChange={(e) => onChange({ ...step, alt: e.target.value })} placeholder="متن جایگزین (برای صفحه‌خوان)" />
             <Input
@@ -360,6 +363,16 @@ export function StepEditor(props: EditorProps) {
               <StepView step={step} />
             </div>
           )}
+        </div>
+      )
+
+    case 'table':
+      return (
+        <div className="space-y-2">
+          <TableEditor step={step} onChange={(k, v) => onChange({ ...step, [k]: v } as typeof step)} />
+          <div className="overflow-x-auto rounded-xl border border-hairline">
+            <StepView step={step} />
+          </div>
         </div>
       )
 

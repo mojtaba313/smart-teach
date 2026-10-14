@@ -6,9 +6,11 @@ import { KIND_ACCENT, KIND_LABEL, SCHEMA_VERSION, emptyAnimation, newLayer, newS
 import { cn, toFaDigits } from '../../lib/utils'
 import type { Timed } from '../../lib/anim/engine'
 
-const BLOCK_KINDS: StepKind[] = ['text', 'list', 'formula', 'callout', 'trap', 'image', 'video', 'code', 'quiz', 'animation']
+const BLOCK_KINDS: StepKind[] = ['text', 'list', 'formula', 'callout', 'trap', 'image', 'table', 'video', 'code', 'quiz', 'animation']
 import { Badge, Button, Field, IconButton, Input, Segmented, Select, Switch, Textarea } from '../ui/primitives'
 import { Menu, type MenuItem } from '../ui/overlay'
+import { ImageUpload } from './ImageUpload'
+import { TableEditor } from './TableEditor'
 
 /**
  * A real block editor — add, reorder, edit, delete — for anywhere a list of
@@ -171,17 +173,35 @@ function BlockFields({ step, onChange }: { step: SlideStep; onChange: (n: SlideS
   const t = 'h-8 text-xs'
 
   switch (step.kind) {
+    case 'image':
+      return (
+        <>
+          <Field label="آدرس تصویر">
+            <Input value={step.value} onChange={(e) => set('value', e.target.value)} className={t} dir="auto" />
+          </Field>
+          <ImageUpload onUploaded={(url) => set('value', url)} />
+          <Field label="متن جایگزین (برای صفحه‌خوان)">
+            <Input value={step.alt ?? ''} onChange={(e) => set('alt', e.target.value)} className={t} />
+          </Field>
+          <Field label="توضیح زیر تصویر">
+            <Input value={step.caption ?? ''} onChange={(e) => set('caption', e.target.value)} className={t} />
+          </Field>
+          <Hint>
+            می‌توانید آدرس بگذارید یا فایل را بارگذاری کنید. تصویر را هم می‌توانید
+            اینجا بچسبانید (Ctrl+V).
+          </Hint>
+        </>
+      )
     case 'text':
     case 'formula':
     case 'code':
-    case 'image':
     case 'video':
       return (
         <>
-          <Field label={step.kind === 'image' || step.kind === 'video' ? 'آدرس' : 'متن'}>
+          <Field label={step.kind === 'video' ? 'آدرس' : 'متن'}>
             <Input value={step.value} onChange={(e) => set('value', e.target.value)} className={t} dir="auto" />
           </Field>
-          {(step.kind === 'image' || step.kind === 'video' || step.kind === 'code') && (
+          {(step.kind === 'video' || step.kind === 'code') && (
             <Field label="توضیح زیر کادر">
               <Input value={step.caption ?? ''} onChange={(e) => set('caption', e.target.value)} className={t} />
             </Field>
@@ -189,6 +209,8 @@ function BlockFields({ step, onChange }: { step: SlideStep; onChange: (n: SlideS
           {step.kind === 'text' && <Hint>می‌توانید **پررنگ**، $فرمول$ و `کد` بنویسید.</Hint>}
         </>
       )
+    case 'table':
+      return <TableEditor step={step} onChange={set} />
     case 'trap':
       return (
         <>

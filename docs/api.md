@@ -284,6 +284,7 @@ type StepBase = { id: string; span: BlockSpan }   // BlockSpan = 'full' | 'half'
 | `callout` | `value: string`, `tone: CalloutTone` | کادر رنگی | `tone: 'info'` |
 | `trap` | `value: string` | «دام رایج» | `''` |
 | `image` | `value: string`, `alt?: string`, `caption?: string` | `<img src>` | `''` |
+| `table` | `rows: string[][]`, `header?: boolean`, `compact?: boolean`, `emphasizeLastRow?: boolean`, `caption?: string` | `<table>` | `rows: [['',''],['','']]`, `header: true` |
 | `video` | `value: string`, `caption?: string` | iframe یا `<video>` | `''` |
 | `code` | `value: string`, `caption?: string` | `<pre>` با دکمهٔ کپی | `''` |
 | `quiz` | `question: string`, `options: string[]`, `answerIndex: number`, `explanation?: string`, `bankId?: string` | سنجش | `''`، `[]`، `0` |
@@ -868,7 +869,13 @@ const EXPR_EXAMPLES: { label: string; expr: string }[]
 | `/bank` | بانک سؤال | — |
 | `/view/:id` | ارائه‌دهنده | `?step=<شمارهٔ کلی>` شروع از گام مشخص |
 | `/studio/:presId/:slideId/:stepId` | استودیوی انیمیشن | — |
+| `POST /api/upload` | بارگذاری تصویر | `multipart/form-data` با میدان `file`؛ پاسخ `{ url, pathname, size }` |
 | هر چیز دیگر | — | `redirect` به `/create` |
+
+`POST /api/upload` فقط `image/png|jpeg|webp|gif|avif` را تا ۵MB می‌پذیرد و
+توکن را سمت سرور نگه می‌دارد. بدون `BLOB_READ_WRITE_TOKEN` پاسخ `501` با
+پیام فارسی می‌دهد و میدان آدرس همچنان کار می‌کند. SVG پذیرفته نمی‌شود: SVG یک
+ظرف اسکریپت است.
 
 `/studio` از هر مسیری فقط یک انیمیشن را ویرایش می‌کند؛ آن را در
 localStorage ذخیره می‌کند (debounce ۷۰۰ms) و پس از بستن، پنجرهٔ تازه‌ای روی

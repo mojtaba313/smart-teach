@@ -373,6 +373,31 @@ export type ImageStep = StepBase & {
   alt?: string
   caption?: string
 }
+/**
+ * A table.
+ *
+ * `rows` is a rectangular grid of strings, header row first. A lesson needs
+ * this constantly — comparing cases, listing conditions, a data table beside a
+ * formula — and every existing workaround was a `code` block, which cannot wrap,
+ * cannot be read aloud by a screen reader as a table, and sorts as text.
+ */
+export type TableStep = StepBase & {
+  kind: 'table'
+  rows: string[][]
+  /**
+   * The first row is a header. Off means the whole grid is body, which is what
+   * you want for a bare two-column comparison.
+   */
+  header?: boolean
+  /** Column widths as fractions; omitted columns share the remainder evenly. */
+  widths?: number[]
+  /** Dense rows for a comparison that has to fit on one screen. */
+  compact?: boolean
+  /** Drawn on the block's left edge; useful for a "therefore" row. */
+  emphasizeLastRow?: boolean
+  caption?: string
+}
+
 export type TrapStep = StepBase & { kind: 'trap'; value: string }
 export type CalloutTone = 'info' | 'tip' | 'warn' | 'idea'
 
@@ -413,6 +438,7 @@ export type SlideStep =
   | TextStep
   | FormulaStep
   | ImageStep
+  | TableStep
   | TrapStep
   | CalloutStep
   | ListStep
@@ -430,6 +456,7 @@ export const KIND_LABEL: Record<StepKind, string> = {
   callout: 'کادر',
   trap: 'تله',
   image: 'تصویر',
+  table: 'جدول',
   video: 'ویدیو',
   code: 'کد',
   quiz: 'پرسش',
@@ -444,6 +471,7 @@ export const KIND_ACCENT: Record<StepKind, string> = {
   callout: '#0891b2',
   trap: '#e11d48',
   image: '#7c3aed',
+  table: '#0d9488',
   video: '#0284c7',
   code: '#059669',
   quiz: '#c026d3',
@@ -456,7 +484,8 @@ export const KIND_HINT: Record<StepKind, string> = {
   formula: 'فرمول LaTeX — بین $...$ هم می‌پذیرد',
   callout: 'کادر رنگی با لحن انتخابی',
   trap: 'دام رایج امتحانی',
-  image: 'آدرس اینترنتی تصویر',
+  image: 'آدرس تصویر یا بارگذاری فایل',
+  table: 'جدول — سطر عنوان، چند سطر و ستون',
   video: 'لینک یوتیوب/آپارات یا فایل mp4',
   code: 'قطعه کد با دکمه‌ی کپی',
   quiz: 'پرسش چهارگزینه‌ای — از بانک سؤال هم می‌آید',
@@ -471,6 +500,7 @@ export const KIND_ALLOWS_NARROW: Record<StepKind, boolean> = {
   callout: true,
   trap: true,
   image: true,
+  table: true,
   video: true,
   code: true,
   quiz: true,
@@ -624,6 +654,8 @@ export function emptyStep(kind: StepKind = 'text'): SlideStep {
       return { ...base, kind, items: [''] }
     case 'quiz':
       return { ...base, kind, question: '', options: ['', ''], answerIndex: 0 }
+    case 'table':
+      return { ...base, kind, rows: [['', ''], ['', '']], header: true }
     case 'callout':
       return { ...base, kind, value: '', tone: 'info' }
     case 'animation':
@@ -645,6 +677,7 @@ const KIND_DEFAULT_SPAN: Record<StepKind, BlockSpan> = {
   callout: 'third',
   trap: 'half',
   image: 'half',
+  table: 'full',
   video: 'half',
   code: 'half',
   quiz: 'full',

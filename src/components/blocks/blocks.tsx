@@ -561,3 +561,78 @@ export function Empty({ value }: { value: string }): ReactNode {
     </div>
   )
 }
+
+/**
+ * A table.
+ *
+ * Rendered as a real `<table>` rather than a grid of divs: a comparison table
+ * is exactly the content a screen reader user navigates by row and column, and
+ * a div grid announces it as an undifferentiated pile of text. The scroll
+ * container keeps `overflow` on a wrapper so a sticky header can work without
+ * fighting the block chrome.
+ */
+export function TableBlock({
+  rows,
+  header = true,
+  caption,
+  compact,
+  emphasizeLastRow,
+}: {
+  rows: string[][]
+  header?: boolean
+  caption?: string
+  compact?: boolean
+  emphasizeLastRow?: boolean
+}) {
+  // A hand-edited table is rarely rectangular; a short row would otherwise
+  // collapse the grid and shift every column to its left.
+  const cols = Math.max(1, ...rows.map((r) => r.length))
+  const body = rows.length === 0 ? [['']] : rows
+  const head = header ? body[0] : null
+  const rest = header ? body.slice(1) : body
+  const last = emphasizeLastRow ? rest.length - 1 : -1
+
+  const pad = compact ? 'px-2 py-1 text-2xs' : 'px-3 py-1.5 text-xs'
+
+  return (
+    <Frame variant="quiet" bodyClassName="p-0">
+      <div className="max-h-[26rem] w-full overflow-auto">
+        <table className="w-full border-collapse text-start">
+          {caption ? <caption className="px-3 pb-1.5 text-start text-2xs text-ink-3">{caption}</caption> : null}
+          <thead className="sticky top-0 z-[1] bg-sunken">
+            <tr>
+              {(head ?? new Array(cols).fill('')).map((cell, i) => (
+                <th
+                  key={i}
+                  scope="col"
+                  className={cn(pad, 'border-b border-hairline text-start font-bold text-ink-2', i > 0 && 'border-s border-hairline')}
+                >
+                  {/* A cell may hold a formula, which is most of what a
+                      physics data table contains. */}
+                  {cell.includes('$') ? <BlockMath math={cell.replace(/\$/g, '')} /> : cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rest.map((row, r) => (
+              <tr key={r} className={cn(r === last && 'bg-brand-soft/30 font-medium')}>
+                {Array.from({ length: cols }, (_, c) => (
+                  <td
+                    key={c}
+                    className={cn(pad, 'border-b border-hairline align-top text-ink-2', c > 0 && 'border-s border-hairline')}
+                  >
+                    {row[c]?.includes('$') ? <BlockMath math={row[c]!.replace(/\$/g, '')} /> : (row[c] ?? '')}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {rest.length === 0 ? (
+        <p className="px-3 py-3 text-2xs text-ink-3">جدول خالی است.</p>
+      ) : null}
+    </Frame>
+  )
+}

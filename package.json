@@ -23,6 +23,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@vercel/blob": "^2.8.1",
     "clsx": "^2.1.1",
     "framer-motion": "^14.0.0",
     "katex": "^0.19.0",

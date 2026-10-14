@@ -116,6 +116,28 @@ function migrateStep(raw: unknown): SlideStep | null {
     }
     case 'image':
       return { id, span, kind, value, alt: isStr(r.alt) ? r.alt : undefined, caption: isStr(r.caption) ? r.caption : undefined }
+    case 'table': {
+      // A table is only usable if it is rectangular and at least one cell
+      // wide; anything else came from a bad import and would render as an
+      // empty grid, so it is normalised here rather than at draw time.
+      const rows = Array.isArray(r.rows)
+        ? (r.rows as unknown[])
+            .map((row) => (Array.isArray(row) ? row.map((c) => (isStr(c) ? c : String(c ?? ''))) : []))
+            .filter((row) => row.length > 0)
+        : []
+      const cols = Math.max(1, ...rows.map((row) => row.length))
+      const padded = rows.map((row) => Array.from({ length: cols }, (_, i) => row[i] ?? ''))
+      return {
+        id,
+        span,
+        kind,
+        rows: padded.length > 0 ? padded : [['']],
+        header: r.header !== false,
+        compact: r.compact === true,
+        emphasizeLastRow: r.emphasizeLastRow === true,
+        caption: isStr(r.caption) ? r.caption : undefined,
+      }
+    }
     case 'video':
     case 'code':
       return { id, span, kind, value, caption: isStr(r.caption) ? r.caption : undefined }

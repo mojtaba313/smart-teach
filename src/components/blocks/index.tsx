@@ -7,6 +7,7 @@ import {
   FunctionSquare,
   Gauge,
   Image as ImageIcon,
+  Table2,
   Lightbulb,
   List,
   MessageSquareQuote,
@@ -20,6 +21,7 @@ import {
   CodeBlock,
   FormulaBlock,
   ImageBlock,
+  TableBlock,
   ListBlock,
   QuizBlock,
   TextBlock,
@@ -63,12 +65,20 @@ function renderStep(step: SlideStep, props: BlockRenderProps): ReactNode {
       return <CalloutBlock value={step.value} tone={step.tone} />
     case 'trap':
       return <TrapBlock value={step.value} />
+    case 'table':
+      return <TableBlock
+        rows={step.rows}
+        header={step.header}
+        compact={step.compact}
+        emphasizeLastRow={step.emphasizeLastRow}
+        caption={step.caption}
+      />
     case 'image':
-      return <ImageBlock value={step.value} alt={step.alt} caption={step.caption} />
+      return <ImageBlock value={step.value} alt={step.alt} />
     case 'video':
-      return <VideoBlock value={step.value} caption={step.caption} />
+      return <VideoBlock value={step.value} />
     case 'code':
-      return <CodeBlock value={step.value} caption={step.caption} />
+      return <CodeBlock value={step.value} />
     case 'quiz':
       return (
         <QuizBlock
@@ -105,6 +115,7 @@ const META: Record<StepKind, { icon: LucideIcon }> = {
   callout: { icon: Lightbulb },
   trap: { icon: AlertTriangle },
   image: { icon: ImageIcon },
+  table: { icon: Table2 },
   video: { icon: Film },
   code: { icon: Code2 },
   quiz: { icon: MessageSquareQuote },
