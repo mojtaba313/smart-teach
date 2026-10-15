@@ -17,6 +17,106 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Who may use the app. Admin > Teacher > Student is a containment, not a
+/// rank: a teacher is not an admin, and a student can never write a deck.
+enum Role {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+model User {
+  id           String   @id
+  username     String   @unique
+  /// bcrypt hash; the plaintext never reaches the database or a log.
+  passwordHash String
+  role         Role     @default(TEACHER)
+  displayName  String   @default("")
+  disabled     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  presentations Presentation[]
+  questions     Question[]
+  sessions      Session[]
+
+  /// This user as the teacher half of the relationship.
+  taughtStudent TeacherStudent[] @relation("TeacherSide")
+  /// This user as the student half.
+  studyingUnder TeacherStudent[] @relation("StudentSide")
+
+  sharesGranted  Share[]       @relation("ShareTeacher")
+  sharesReceived Share[]       @relation("ShareStudent")
+  liveSessions   LiveSession[]
+}
+
+model Session {
+  /// SHA-256 of the cookie value, never the value itself: a database dump
+  /// should not be enough to impersonate anyone.
+  id        String   @id
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// A student can have many teachers and a teacher many students, so this is
+/// genuinely many-to-many rather than a `teacherId` on the student row.
+model TeacherStudent {
+  teacherId String
+  studentId String
+  createdAt DateTime @default(now())
+
+  teacher User @relation("TeacherSide", fields: [teacherId], references: [id], onDelete: Cascade)
+  student User @relation("StudentSide", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([teacherId, studentId])
+  @@index([studentId])
+}
+
+/// A deck a teacher has chosen to put in front of one student. Sharing is per
+/// student rather than per teacher, so one awkward deck does not become everyone's.
+model Share {
+  id             String   @id
+  presentationId String
+  teacherId      String
+  studentId      String
+  createdAt      DateTime @default(now())
+
+  presentation Presentation @relation(fields: [presentationId], references: [id], onDelete: Cascade)
+  teacher      User         @relation("ShareTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  student      User         @relation("ShareStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([presentationId, studentId])
+  @@index([studentId])
+}
+
+/// A live teaching session. The current step lives here so a student who joins
+/// late can catch up immediately instead of waiting for the next broadcast.
+model LiveSession {
+  id             String    @id
+  /// Short code students type to join.
+  code           String    @unique
+  teacherId      String
+  title          String    @default("")
+  /// The deck being taught.
+  presentationId String?
+  step           Int       @default(0)
+  live           Boolean   @default(false)
+  startedAt      DateTime  @default(now())
+  endedAt        DateTime?
+
+  teacher      User          @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  presentation Presentation? @relation(fields: [presentationId], references: [id], onDelete: SetNull)
+
+  @@index([teacherId])
+  @@index([live])
+}
+
 model Presentation {
   id          String   @id
   title       String
@@ -29,10 +129,17 @@ model Presentation {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  progress   Progress?
-  quizBlocks QuizLink[]
+  /// Null only for rows that predate accounts; those stay admin-visible.
+  ownerId String?
+  owner   User?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  progress     Progress?
+  quizBlocks   QuizLink[]
+  shares       Share[]
+  liveSessions LiveSession[]
 
   @@index([updatedAt])
+  @@index([ownerId])
 }
 
 model Question {
@@ -56,9 +163,13 @@ model Question {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  ownerId String?
+  owner   User?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
   quizBlocks QuizLink[]
 
   @@index([difficulty])
+  @@index([ownerId])
   @@index([starred])
   @@index([source, year])
   @@index([tags], type: Gin)
@@ -72,8 +183,8 @@ model QuizLink {
   presentation String
   question     String
 
-  deck     Presentation @relation(fields: [presentation], references: [id], onDelete: Cascade)
-  question_ Question    @relation(fields: [question], references: [id], onDelete: Cascade)
+  deck      Presentation @relation(fields: [presentation], references: [id], onDelete: Cascade)
+  question_ Question     @relation(fields: [question], references: [id], onDelete: Cascade)
 
   @@unique([stepId, presentation])
   @@index([presentation])
