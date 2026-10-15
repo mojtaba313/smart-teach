@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookMarked,
   Copy,
@@ -43,6 +43,9 @@ import {
 } from '../lib/store'
 import { downloadJSON, safeFilename } from '../storage'
 import { spanClass, spanCols } from '../lib/span'
+/** How long typing must pause before the deck is written. */
+const SAVE_DEBOUNCE_MS = 600
+
 import { useNav } from '../lib/nav'
 import { SyncBadge } from '../components/SyncBadge'
 import { cn, moveItem, toFaDigits } from '../lib/utils'
@@ -82,7 +85,17 @@ export default function Create() {
   const library = usePresentations()
   const questions = useQuestions()
 
-  const [activeId, setActiveId] = useState<string>(() => library[0]?.id ?? '')
+  /**
+   * Which deck is open.
+   *
+   * This used to be seeded from the library in a `useState` initialiser. The
+   * library now arrives asynchronously from the API, so on the very first
+   * render it was always empty and `activeId` stayed `''` for the life of the
+   * screen — the editor had no document to write to, and creating a deck did
+   * nothing visible. It starts null ("not chosen yet") and the effect below
+   * picks the first deck once one actually arrives.
+   */
+  const [activeId, setActiveId] = useState<string | null>(null)
   const pres = library.find((p) => p.id === activeId)
 
   const [past, setPast] = useState<Presentation[]>([])
@@ -102,29 +115,84 @@ export default function Create() {
   const [picker, setPicker] = useState<{ slideId: string; index: number } | null>(null)
   const [creating, setCreating] = useState<{ seed: string; slideId: string; index: number } | null>(null)
 
+  /* ---------------- save queue ---------------- */
+
+  /**
+   * Coalesce writes.
+   *
+   * Every edit lands in the store immediately — the UI never waits — and the
+   * database is updated once typing pauses. Only the newest document is sent:
+   * an intermediate state that the user never saw is not worth a round trip.
+   */
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveTarget = useRef<Presentation | null>(null)
+  const queueSave = useCallback((next: Presentation) => {
+    saveTarget.current = next
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null
+      const target = saveTarget.current
+      saveTarget.current = null
+      if (target) void putPresentation(target).catch(() => toast('ذخیره ناکام ماند؛ اتصال را بررسی کنید.', 'err'))
+    }, SAVE_DEBOUNCE_MS)
+  }, [])
+
+  // A pending write must not be lost when the tab closes mid-pause.
+  useEffect(() => {
+    const flush = () => {
+      const target = saveTarget.current
+      if (target) {
+        saveTarget.current = null
+        void putPresentation(target)
+      }
+    }
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    }
+  }, [])
+
   /* ---------------- mutation with history ---------------- */
 
-  const patch = useCallback(
-    (fn: (p: Presentation) => Presentation) => {
-      if (!pres) return
-      const next = fn(pres)
-      setPast((x) => [...x.slice(-79), pres])
-      setFuture([])
-      putPresentation(next)
-      setHistoryTick((x) => x + 1)
-    },
-    [pres],
-  )
+  /**
+   * The newest document, readable from inside an event handler.
+   *
+   * `patch` used to close over `pres`, which is the value from the last render.
+   * Two keystrokes in the same frame therefore both started from the same
+   * document and the second overwrote the first — typing "RoundTripProbe"
+   * landed as "Rudrpre". A ref is updated during render, so the handler always
+   * reads the latest value without needing the closure to be rebuilt.
+   */
+  const presRef = useRef<Presentation | undefined>(pres)
+  presRef.current = pres
+
+  const patch = useCallback((fn: (p: Presentation) => Presentation) => {
+    const current = presRef.current
+    if (!current) return
+    const next = fn(current)
+    // Reflect it immediately so a second keystroke in the same frame sees it.
+    presRef.current = next
+    setPast((x) => [...x.slice(-79), current])
+    setFuture([])
+    // Debounced: one PUT per pause in typing rather than one per keystroke.
+    // Typing a 20-character title should not be 20 database writes, and each
+    // one is a window in which the next keystroke can arrive out of order.
+    queueSave(next)
+    setHistoryTick((x) => x + 1)
+  }, [queueSave])
 
   const undo = useCallback(() => {
-    if (!pres) return
+    const current = presRef.current
+    if (!current) return
     const prev = past[past.length - 1]
     if (!prev) return
     setPast((x) => x.slice(0, -1))
-    setFuture((x) => [...x, pres])
-    putPresentation(prev)
+    setFuture((x) => [...x, current])
+    presRef.current = prev
+    queueSave(prev)
     setHistoryTick((x) => x + 1)
-  }, [past, pres])
+  }, [past])
 
   const redo = useCallback(() => {
     if (!pres) return
@@ -138,12 +206,32 @@ export default function Create() {
 
   void historyTick
 
-  const createDeck = useCallback(() => {
+  const createDeck = useCallback(async () => {
     const fresh = blankPresentation()
-    putPresentation(fresh)
-    setActiveId(fresh.id)
-    return fresh
+    // Await it: the deck must exist in the database before anything can be
+    // edited into it, or the first edit is applied to a document the server
+    // has never heard of.
+    try {
+      await putPresentation(fresh)
+      setActiveId(fresh.id)
+      setPast([])
+      setFuture([])
+      toast('ارائهٔ تازه ساخته شد ✓')
+      return fresh
+    } catch {
+      toast('ساخت ارائه ناکام ماند؛ اتصال را بررسی کنید.', 'err')
+      return null
+    }
   }, [])
+
+  // Choose the first deck once the library arrives, unless a deep link or the
+  // ?deck= parameter already named one.
+  useEffect(() => {
+    if (activeId || library.length === 0) return
+    const deep = new URLSearchParams(window.location.search).get('deck')
+    const wanted = deep && library.some((p) => p.id === deep) ? deep : library[0].id
+    setActiveId(wanted)
+  }, [activeId, library])
 
   /* ---------------- slide ops ---------------- */
 
@@ -154,8 +242,14 @@ export default function Create() {
   )
 
   const addSlide = useCallback(() => {
-    const deck = pres ?? createDeck()
-    if (!deck) return
+    // `createDeck` is async now, so adding a slide to a deck that does not
+    // exist yet has to wait for it to be created rather than editing a promise.
+    if (!pres) {
+      void createDeck().then((deck) => {
+        if (deck) patch((p) => ({ ...p, slides: [...p.slides, emptySlide(p.slides.length + 1)] }))
+      })
+      return
+    }
     patch((p) => ({ ...p, slides: [...p.slides, emptySlide(p.slides.length + 1)] }))
   }, [pres, createDeck, patch])
 
