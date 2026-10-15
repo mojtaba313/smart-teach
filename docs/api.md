@@ -869,13 +869,21 @@ const EXPR_EXAMPLES: { label: string; expr: string }[]
 | `/bank` | بانک سؤال | — |
 | `/view/:id` | ارائه‌دهنده | `?step=<شمارهٔ کلی>` شروع از گام مشخص |
 | `/studio/:presId/:slideId/:stepId` | استودیوی انیمیشن | — |
-| `POST /api/upload` | بارگذاری تصویر | `multipart/form-data` با میدان `file`؛ پاسخ `{ url, pathname, size }` |
+| `GET /api/media` | فهرست تصاویر | `{ configured, owner, repo, branch, dir, images[] }` |
+| `POST /api/media` | بارگذاری تصویر | `multipart/form-data` با میدان `file`؛ پاسخ `{ name, path, sha, size, url }` |
+| `DELETE /api/media/:name` | حذف تصویر | نام باید با الگوی تولیدی بخواند |
 | هر چیز دیگر | — | `redirect` به `/create` |
 
-`POST /api/upload` فقط `image/png|jpeg|webp|gif|avif` را تا ۵MB می‌پذیرد و
-توکن را سمت سرور نگه می‌دارد. بدون `BLOB_READ_WRITE_TOKEN` پاسخ `501` با
-پیام فارسی می‌دهد و میدان آدرس همچنان کار می‌کند. SVG پذیرفته نمی‌شود: SVG یک
-ظرف اسکریپت است.
+`/api/media` تصاویر را در یک ریپوی GitHub از راه Contents API نگه می‌دارد.
+توکن یک Fine-grained PAT است که **فقط سمت سرور** خوانده می‌شود و هرگز به
+مرورگر نمی‌رسد — برخلاف یکپارچه‌سازی سمت کلاینت که توکن را در `localStorage`
+نگه می‌دارد و هر اسکریپت تزریق‌شده‌ای آن را می‌خواند. متغیرها: `GITHUB_TOKEN`،
+`GITHUB_OWNER`، `GITHUB_REPO` و `GITHUB_BRANCH` (پیش‌فرض `main`). بدون آن‌ها
+پاسخ `501` است و میدان آدرس همچنان کار می‌کند.
+
+فقط `image/png|jpeg|webp|gif|avif` تا ۵MB پذیرفته می‌شود. SVG رد می‌شود: SVG یک
+ظرف اسکریپت است. نام فایل روی سرور ساخته می‌شود و نام فرستاده‌شدهٔ کاربر هرگز
+به مسیر نمی‌رسد.
 
 `/studio` از هر مسیری فقط یک انیمیشن را ویرایش می‌کند؛ آن را در
 localStorage ذخیره می‌کند (debounce ۷۰۰ms) و پس از بستن، پنجرهٔ تازه‌ای روی
