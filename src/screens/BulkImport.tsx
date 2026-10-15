@@ -5,7 +5,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardPaste, Database, Penci
 import type { AnswerKey, BankQuestion, SlideStep } from '../types'
 import { DIFFICULTIES, DIFFICULTY_HINT, DIFFICULTY_LABEL, KIND_LABEL, emptyQuestion, uid } from '../types'
 import { migrateQuestion } from '../storage'
-import { useQuestions } from '../lib/store'
+import { refreshStores, useQuestions } from '../lib/store'
 import { api, useSyncState } from '../lib/sync'
 import { cn, toFaDigits } from '../lib/utils'
 import { StepView } from '../components/blocks'
@@ -116,13 +116,15 @@ export default function BulkImport() {
   const save = async () => {
     if (valid.length === 0) return
     const payload = valid.map((d) => d.question).filter((q): q is BankQuestion => !!q)
-    try {
-      await api.saveQuestions(payload)
-    } catch {
-      toast('پایگاه داده در دسترس نیست — تغییرات فقط در همین مرورگر ذخیره شد', 'err')
+    // The database is the only store, so a failed write is a failed write.
+    // Reporting success and losing the questions is what the local mirror used
+    // to enable, and it is the reason a bulk import could vanish.
+    const saved = await api.saveQuestions(payload)
+    if (!saved) {
+      toast('پایگاه داده در دسترس نیست — سؤال‌ها ذخیره نشدند', 'err')
+      return
     }
-    // Local cache first, so the bank list updates even when the API is down.
-    for (const q of payload) if (!existing.has(q.id)) upsertLocal(q)
+    await refreshStores()
     toast(`${toFaDigits(payload.length)} سؤال ذخیره شد ✓`, 'ok', { detail: withKey ? `${toFaDigits(withKey)} پاسخ‌نامه دارد` : undefined })
     navigate('/bank')
   }
@@ -429,21 +431,6 @@ function normaliseList(parsed: unknown): unknown[] {
     return (parsed as { questions: unknown[] }).questions
   }
   return [parsed]
-}
-
-/** Local cache write so the bank list updates even if the API is unreachable. */
-function upsertLocal(q: BankQuestion) {
-  try {
-    const key = 'smart-teach:question-bank:v1'
-    const raw = JSON.parse(localStorage.getItem(key) ?? '{"schema":1,"questions":[]}')
-    const list: BankQuestion[] = raw.questions ?? []
-    const i = list.findIndex((x) => x.id === q.id)
-    if (i >= 0) list[i] = q
-    else list.unshift(q)
-    localStorage.setItem(key, JSON.stringify({ ...raw, questions: list, updatedAt: Date.now() }))
-  } catch {
-    /* cache write is best-effort */
-  }
 }
 
 export { DIFFICULTIES, DIFFICULTY_HINT }

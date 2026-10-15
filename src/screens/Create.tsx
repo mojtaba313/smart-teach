@@ -268,9 +268,9 @@ export default function Create() {
     toast('تغییر نام ذخیره شد ✓')
   }, [renaming, renameValue])
 
-  const duplicateDeck = useCallback(() => {
+  const duplicateDeck = useCallback(async () => {
     if (!pres) return
-    const copy = copyPresentation(pres.id)
+    const copy = await copyPresentation(pres.id)
     if (copy) {
       setActiveId(copy.id)
       toast('کپی ساخته شد')
@@ -447,10 +447,10 @@ export default function Create() {
 
   const handleImport = (file: File) => {
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result))
-        const next = ingestPresentations(parsed)
+        const next = await ingestPresentations(parsed)
         const first = Array.isArray(parsed) ? parsed[0] : parsed
         if (first?.id && next.some((p) => p.id === first.id)) setActiveId(first.id)
         toast('وارد شد ✓')
@@ -536,8 +536,8 @@ export default function Create() {
                     onSelect: () => setActiveId(p.id),
                   },
                   { type: 'item', key: 'rename', label: 'تغییر نام', icon: <Pencil className="size-4" />, onSelect: () => requestRename(p) },
-                  { type: 'item', key: 'dup', label: 'تکثیر', icon: <Copy className="size-4" />, onSelect: () => {
-                    const c = copyPresentation(p.id)
+                  { type: 'item', key: 'dup', label: 'تکثیر', icon: <Copy className="size-4" />, onSelect: async () => {
+                    const c = await copyPresentation(p.id)
                     if (c) {
                       setActiveId(c.id)
                       toast('کپی ساخته شد ✓')

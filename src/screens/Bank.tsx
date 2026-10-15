@@ -98,10 +98,10 @@ export default function Bank() {
 
   const handleImport = (file: File) => {
     const reader = new FileReader()
-    reader.onload = () => {
+    reader.onload = async () => {
       try {
         const parsed = JSON.parse(String(reader.result))
-        const bank = ingestBank(parsed)
+        const bank = await ingestBank(parsed)
         toast(`${toFaDigits(bank.questions.length)} سؤال وارد شد ✓`)
       } catch {
         toast('فایل بانک سؤال معتبر نیست', 'err')

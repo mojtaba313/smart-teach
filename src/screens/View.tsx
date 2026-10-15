@@ -77,8 +77,15 @@ export default function View() {
   // where there is no `window` and no history to replace.
   // `?step=` wins, then the last saved position, then the start.
   const deepLink = Number(params.get('step'))
-  const [current, setCurrent] = useState(() =>
-    Number.isFinite(deepLink) && deepLink >= 0 ? deepLink : (id ? (loadProgress(id) ?? 0) : 0),
+  /**
+   * Progress lives in the database now, so the resume point is a round trip.
+   * It starts at 0 and is filled in below; `resumeReady` gates the URL sync so
+   * the presenter does not overwrite the stored position with 0 before it has
+   * been read.
+   */
+  const [current, setCurrent] = useState(Number.isFinite(deepLink) && deepLink >= 0 ? deepLink : 0)
+  const [resumeReady, setResumeReady] = useState(
+    Number.isFinite(deepLink) && deepLink >= 0,
   )
   const hydrated = useMounted()
   const [overview, setOverview] = useState(false)
@@ -100,14 +107,23 @@ export default function View() {
 
   const finished = total > 0 && current >= total
 
+  /* ---- resume where the last presentation left off ---- */
+  useEffect(() => {
+    if (!id || resumeReady) return
+    void loadProgress(id).then((step) => {
+      if (typeof step === 'number') setCurrent(step)
+      setResumeReady(true)
+    })
+  }, [id, resumeReady])
+
   /* ---- keep the URL and the resume point in sync ---- */
   useEffect(() => {
-    if (!id || !hydrated) return
+    if (!id || !hydrated || !resumeReady) return
     const next = new URLSearchParams(window.location.search)
     next.set('step', String(current))
     window.history.replaceState(null, '', `${window.location.pathname}?${next.toString()}`)
-    saveProgress(id, current)
-  }, [id, current, hydrated])
+    void saveProgress(id, current)
+  }, [id, current, hydrated, resumeReady])
 
   /* ---- scroll the active block into view ---- */
   useEffect(() => {

@@ -1,24 +1,24 @@
 'use client'
 import { Cloud, CloudOff, RefreshCw } from 'lucide-react'
-import { pendingCount, pushLocalToServer, useSyncState } from '../lib/sync'
-import { usePresentations } from '../lib/store'
+import { useSyncState } from '../lib/sync'
+import { refreshStores } from '../lib/store'
 import { toFaDigits } from '../lib/utils'
-import { Button, Badge } from './ui/primitives'
+import { Badge, Button } from './ui/primitives'
 import { toast } from './ui/overlay'
 
 /**
- * Where the data came from, and what is still waiting to go up.
+ * Whether the database is reachable.
  *
- * "PostgreSQL is the source of truth" is only true if people can see it: this
- * says whether the last load came from the database, whether edits are queued
- * because it could not be reached, and offers the one-time hand-over.
+ * This used to report how many edits were queued in `localStorage` and offer to
+ * hand the browser's copy up to the server. With one store there is no queue
+ * and no second copy, so all that is left to say is "it worked" or "it did
+ * not" — and a retry, because a transient failure should be one click to
+ * recover rather than a reload.
  */
 export function SyncBadge() {
   const state = useSyncState()
-  const library = usePresentations()
-  const pending = pendingCount()
 
-  if (state === 'online' && pending === 0) {
+  if (state === 'online') {
     return (
       <Badge tone="ok" className="gap-1">
         <Cloud className="size-3" />
@@ -27,36 +27,25 @@ export function SyncBadge() {
     )
   }
 
-  if (state === 'offline' && pending > 0) {
-    return (
-      <Badge tone="danger" className="gap-1">
-        <CloudOff className="size-3" />
-        آفلاین · {toFaDigits(pending)} در صف
-      </Badge>
-    )
-  }
-
   return (
     <span className="inline-flex items-center gap-1">
-      <Badge tone="accent" className="gap-1">
+      <Badge tone="danger" className="gap-1">
         <CloudOff className="size-3" />
-        آفلاین — فقط همین مرورگر
+        آفلاین — تغییراتی ذخیره نشده
       </Badge>
-      {library.length > 0 && (
-        <Button
-          size="xs"
-          variant="subtle"
-          icon={RefreshCw}
-          onClick={async () => {
-            const r = await pushLocalToServer()
-            toast('کتابخانه به پایگاه داده رفت ✓', 'ok', {
-              detail: `${toFaDigits(r.presentations)} ارائه · ${toFaDigits(r.questions)} سؤال`,
-            })
-          }}
-        >
-          بفرست به پایگاه داده
-        </Button>
-      )}
+      <Button
+        size="xs"
+        variant="subtle"
+        icon={RefreshCw}
+        onClick={async () => {
+          await refreshStores()
+          toast('تلاش دوباره شد', 'ok', {
+            detail: `${toFaDigits(new Date().toLocaleTimeString('fa-IR'))}`,
+          })
+        }}
+      >
+        تلاش دوباره
+      </Button>
     </span>
   )
 }
